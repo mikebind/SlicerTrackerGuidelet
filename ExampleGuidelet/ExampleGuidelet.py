@@ -31,6 +31,14 @@ class ExampleGuideletWidget(GuideletWidget):
 
   def setup(self):
     GuideletWidget.setup(self)
+    fileDir = os.path.dirname(__file__)
+    iconPathRecord = os.path.join(fileDir, 'Resources', 'Icons', 'icon_Record.png')
+    iconPathStop = os.path.join(fileDir, 'Resources', 'Icons', 'icon_Stop.png')
+
+    if os.path.isfile(iconPathRecord):
+      self.recordIcon = qt.QIcon(iconPathRecord)
+    if os.path.isfile(iconPathStop):
+      self.stopIcon = qt.QIcon(iconPathStop)
 
 
   def addLauncherWidgets(self):
@@ -56,6 +64,33 @@ class ExampleGuideletWidget(GuideletWidget):
 
   def createGuideletLogic(self):
     return ExampleGuideletLogic()
+  
+  def onStartStopRecordingClicked(self):
+    """ originally Copied from UltraSound.py"""
+    if self.startStopRecordingButton.isChecked():
+      self.startStopRecordingButton.setText("  Stop Recording")
+      self.startStopRecordingButton.setIcon(self.stopIcon)
+      self.startStopRecordingButton.setToolTip("Recording is being started...")
+      if self.captureDeviceName  != '':
+        # Important to save as .mhd because that does not require lengthy finalization (merging into a single file)
+        recordPrefix = self.guideletParent.parameterNode.GetParameter('RecordingFilenamePrefix')
+        recordExt = self.guideletParent.parameterNode.GetParameter('RecordingFilenameExtension')
+        self.recordingFileName =  recordPrefix + time.strftime("%Y%m%d-%H%M%S") + recordExt
+
+        logging.info("Starting recording to: {0}".format(self.recordingFileName))
+
+        self.plusRemoteNode.SetCurrentCaptureID(self.captureDeviceName)
+        self.plusRemoteNode.SetRecordingFilename(self.recordingFileName)
+        self.plusRemoteLogic.StartRecording(self.plusRemoteNode)
+
+    else:
+      self.startStopRecordingButton.setText("  Start Recording")
+      self.startStopRecordingButton.setIcon(self.recordIcon)
+      self.startStopRecordingButton.setToolTip( "Recording is being stopped..." )
+      if self.captureDeviceName  != '':
+        logging.info("Stopping recording")
+        self.plusRemoteNode.SetCurrentCaptureID(self.captureDeviceName)
+        self.plusRemoteLogic.StopRecording(self.plusRemoteNode)
 
 
 class ExampleGuideletLogic(GuideletLogic):
@@ -162,7 +197,11 @@ class ExampleGuideletGuidelet(Guidelet):
     ReferenceToRas is needed for initialization, so we need to set it up before calling Guidelet.setupScene().
     '''
 
-    self.referenceToRas = slicer.util.getNode('ReferenceToRas')
+    try:
+      self.referenceToRas = slicer.util.getNode('EmTrackerToHeadSenso')
+    except slicer.util.MRMLNodeNotFoundException:
+      self.referenceToRas = None
+    ## self.referenceToRas = slicer.util.getNode('ReferenceToRas')
     if not self.referenceToRas:
       self.referenceToRas=slicer.vtkMRMLLinearTransformNode()
       self.referenceToRas.SetName("ReferenceToRas")
@@ -173,6 +212,8 @@ class ExampleGuideletGuidelet(Guidelet):
       slicer.mrmlScene.AddNode(self.referenceToRas)
 
     Guidelet.setupScene(self)
+    # Not sure why 'EmTrackerToHeadSenso' didn't exist yet, trying processing events here
+    slicer.app.processEvents() 
 
     # Transforms
 
@@ -184,35 +225,55 @@ class ExampleGuideletGuidelet(Guidelet):
     In your application Needle may be called Stylus, or maybe you don't need such a tool at all.
     '''
 
-    self.needleToReference = slicer.util.getNode('NeedleToReference')
-    if not self.needleToReference:
-      self.needleToReference = slicer.vtkMRMLLinearTransformNode()
-      self.needleToReference.SetName('NeedleToReference')
-      slicer.mrmlScene.AddNode(self.needleToReference)
+    ## self.needleToReference = slicer.util.getNode('NeedleToReference')
+    ## if not self.needleToReference:
+    ##   self.needleToReference = slicer.vtkMRMLLinearTransformNode()
+    ##   self.needleToReference.SetName('NeedleToReference')
+    ##   slicer.mrmlScene.AddNode(self.needleToReference)
 
-    self.needleTipToNeedle = slicer.util.getNode('NeedleTipToNeedle')
-    if not self.needleTipToNeedle:
-      self.needleTipToNeedle = slicer.vtkMRMLLinearTransformNode()
-      self.needleTipToNeedle.SetName('NeedleTipToNeedle')
-      m = self.logic.readTransformFromSettings('NeedleTipToNeedle', self.configurationName)
-      if m:
-        self.needleTipToNeedle.SetMatrixTransformToParent(m)
-      slicer.mrmlScene.AddNode(self.needleTipToNeedle)
+    ## self.needleTipToNeedle = slicer.util.getNode('NeedleTipToNeedle')
+    ## if not self.needleTipToNeedle:
+    ##   self.needleTipToNeedle = slicer.vtkMRMLLinearTransformNode()
+    ##   self.needleTipToNeedle.SetName('NeedleTipToNeedle')
+    ##   m = self.logic.readTransformFromSettings('NeedleTipToNeedle', self.configurationName)
+    ##   if m:
+    ##     self.needleTipToNeedle.SetMatrixTransformToParent(m)
+    ##   slicer.mrmlScene.AddNode(self.needleTipToNeedle)
+
+    self.EmTrackerToHeadSensor = slicer.util.getNode('EmTrackerToHeadSenso')
+    self.StylusSensorToEmTracker = slicer.util.getNode('StylusSensorToEmTrac')
+    self.StylusTipToStylusSensor = slicer.util.getNode('StylusTipToStylusSen')
+    self.NeedleTipToStylusSensor = slicer.util.getNode('NeedleTipToStylusSen')
+    self.HeadSensorToHeadSTL = slicer.util.getNode('HeadSensorToHeadSTL')
+
 
     # Models
     logging.debug('Create models')
 
-    self.needleModel = slicer.util.getNode('NeedleModel')
+    try: 
+      self.needleModel = slicer.util.getNode('NeedleModel')
+    except slicer.util.MRMLNodeNotFoundException:
+      self.needleModel = None
     if not self.needleModel:
       self.needleModel = slicer.modules.createmodels.logic().CreateNeedle(80, 1.0, 2.5, 0)
       self.needleModel.SetName('NeedleModel')
 
     # Build transform tree
     logging.debug('Set up transform tree')
+    ## In our case, the transform tree is
+    ## HeadSensorToHeadSTL > EmTrackerToHeadSenso > StylusSensorToEmTrac > StylusTipToStylusSen
+    self.EmTrackerToHeadSensor.SetAndObserveTransformNodeID(self.HeadSensorToHeadSTL.GetID())
+    self.StylusSensorToEmTracker.SetAndObserveTransformNodeID(self.EmTrackerToHeadSensor.GetID())
+    #self.StylusTipToStylusSensor.SetAndObserveTransformNodeID(self.StylusSensorToEmTracker.GetID())
+    self.NeedleTipToStylusSensor.SetAndObserveTransformNodeID(self.StylusSensorToEmTracker.GetID())
+    # NOTE Choose one of the following two lines depending on which stylus/sensor type is appropriate
+    self.needleModel.SetAndObserveTransformNodeID(self.NeedleTipToStylusSensor.GetID())
+    #self.needleModel.SetAndObserveTransformNodeID(self.StylusTipToStylusSensor.GetID())
 
-    self.needleToReference.SetAndObserveTransformNodeID(self.referenceToRas.GetID())
-    self.needleTipToNeedle.SetAndObserveTransformNodeID(self.needleToReference.GetID())
-    self.needleModel.SetAndObserveTransformNodeID(self.needleTipToNeedle.GetID())
+    ## self.needleToReference.SetAndObserveTransformNodeID(self.referenceToRas.GetID())
+    ## self.needleTipToNeedle.SetAndObserveTransformNodeID(self.needleToReference.GetID())
+    ## self.needleModel.SetAndObserveTransformNodeID(self.needleTipToNeedle.GetID())
+
 
     # Hide slice view annotations (patient name, scale, color bar, etc.) as they
     # decrease reslicing performance by 20%-100%
@@ -280,6 +341,7 @@ class ExampleGuideletGuidelet(Guidelet):
     # Disable automatic ultrasound image auto-fit when the user unfreezes (connect)
     # to avoid zooming out of the image.
     self.fitUltrasoundImageToViewOnConnect = not toggled
+
 
 
   def getCamera(self, viewName):
