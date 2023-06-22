@@ -1,8 +1,8 @@
 import os
 from __main__ import vtk, qt, ctk, slicer
 
-from Guidelet import GuideletLoadable, GuideletLogic, GuideletTest, GuideletWidget
-from Guidelet import Guidelet
+from SlicerGuideletBase import GuideletLoadable, GuideletLogic, GuideletTest, GuideletWidget
+from SlicerGuideletBase import Guidelet
 import logging
 import time
 
