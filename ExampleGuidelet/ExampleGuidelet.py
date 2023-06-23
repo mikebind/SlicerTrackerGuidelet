@@ -101,6 +101,405 @@ class ExampleGuideletLogic(GuideletLogic):
   def __init__(self, parent = None):
     GuideletLogic.__init__(self, parent)
 
+  # Next goal - write test to process multiple files and crop them to just inside paths
+  def processTrackerFileToRuns(self, mhaFile, segmentationNode, entryRegionName='entryZone', deeperRegionName='deeperZone'):
+      """Inputs are name/path to saved tracker recording file, segmentation node with segments 
+      an entry zone and a deeper zone (used to define what counts as a run and how they should 
+      trimmed). 
+      Created during processing: Loaded path as markups curve node, trimmed paths (runs) 
+      """
+      timeStamps, headSensorTransforms, scopeSensorTransforms = self.import_tracker_recording(mhaFile)
+      # Set up the hierarchy order 
+      transformsList = self.gatherTestingTransforms()
+      transformsList[1] = headSensorTransforms
+      transformsList[2] = scopeSensorTransforms
+      # Get sequence of locations in RAS space
+      positions = self.positions_from_transform_hierarchy(transformsList)
+      rawPathModelNode = self.modelNodeFromPositions(positions)
+      #rawCurveNode = self.markupsCurveFromPositions(positions)
+      # Gather runs data
+      runsData = self.identifyTrackingRunsFromRawPath(positions, segmentationNode)
+      pathRunsModelNodes = []
+      for runData in runsData:
+          startIdx, endIdx = runData
+          runPositions = runData[startIdx:(endIdx+1),:] # NOTE: NOT a deep copy
+          #self.trimPathToRange(positions, startIdx, endIdx)
+          pathRunModelNode = self.modelNodeFromPositions(runPositions)
+          pathRunsModelNodes.append(pathRunModelNode)
+      return 
+
+  def modelNodeFromPositions(self, positions):
+      """Create model node with polydata (for non-interactive version of markups)
+      Helpful links: 
+      https://www.dillonbhuff.com/?p=540
+      https://vtk.org/doc/release/5.0/html/a01880.html#:~:text=vtkPolyData%20is%20a%20data%20object,also%20are%20represented.
+      """
+      import numpy as np
+      # Create VTK arrays needed for model node
+      points = vtk.vtkPoints() # actual pointData locations
+      vertices = vtk.vtkCellArray() # handles vertex locations (in our case this will just be all the points, but note that
+      # points could be a superset of vertices because points could include the endpoints of lines or corners of polygons 
+      # which don't themselves have to be in the list of vertices.  Vertices are what the vtkGlyph3D filter operates on
+      lines = vtk.vtkCellArray() # handles lines (and same type would handle polygons if those were being used)
+
+      pointsArray = positions # an nx3 numpy array
+      diffs = np.diff(pointsArray, axis=0)
+
+      vectors = vtk.vtkFloatArray() # this will affect glyph orientation and is going to be set to the vector to the next point
+      vectors.SetNumberOfComponents(3)
+      vectors.SetName("Directions")
+
+      #sizes = vtk.vtkFloatArray() # this will go in scalars 
+      #sizes.SetName("Sizes")
+      #colors = vtk.vtkFloatArray()
+      #colors.SetName("Colors")
+      vectors = vtk.vtkFloatArray() # this will affect glyph orientation and is going to be set to the vector to the next point
+      vectors.SetNumberOfComponents(3)
+      vectors.SetName("Directions")
+
+      # Assemble arrays of values
+      for i, vectorThisToNext in enumerate(diffs):
+          point = pointsArray[i]
+          pointID = points.InsertNextPoint(point)
+          # Vertices
+          cellID = vertices.InsertNextCell(1) # allocates a next cell with space for one point ID (lines would have 2, triangles 3, polygons N)
+          vertices.InsertCellPoint(pointID) # fills the first (and only) slot for this cell
+          #size = e[i] * sizeFactor
+          #_ = sizes.InsertNextValue(size)
+          #colorIdx = cmapIndices[i]
+          #_ = colors.InsertNextValue(colorIdx)
+          # Vectors
+          _ = vectors.InsertNextTuple(vectorThisToNext)
+          # Lines
+          lines.InsertNextCell(2) # allocates a next cell with space for two pointIDs (the endpoints of the line)
+          lines.InsertCellPoint(pointID)
+          lines.InsertCellPoint(pointID+1)
+      # The above loop leaves off the last contact (because len(diffs) is one less than number of points)
+      # Adding this next section to make sure that last point is included
+      point = pointsArray[i + 1]
+      pointID = points.InsertNextPoint(point)
+      vertices.InsertCellPoint(pointID)
+      #size = e[i + 1] * sizeFactor
+      #_ = sizes.InsertNextValue(size)
+      #colorIdx = cmapIndices[i + 1]
+      #_ = colors.InsertNextValue(colorIdx)
+      _ = vectors.InsertNextTuple(vectorThisToNext)  # just repeat last vector
+      # Lines is already complete (there are n-1 lines for n points)
+
+      ## Create the vtkPolyData
+      pointsPolyData = vtk.vtkPolyData()
+      pointsPolyData.SetPoints(points)
+      pointsPolyData.SetVerts(vertices)
+      pointsPolyData.SetLines(lines)
+      pointsData = pointsPolyData.GetPointData()
+      #_ = pointsData.SetScalars(sizes)
+      _ = pointsData.SetVectors(vectors)
+      #_ = pointsData.AddArray(colors)
+
+      sphere = vtk.vtkSphereSource()  # ConeSource()
+      cone = vtk.vtkConeSource()
+      cone.SetResolution(18)
+
+      linesPolyData = vtk.vtkPolyData()
+      linesPolyData.SetPoints(points)
+      linesPolyData.SetLines(lines)
+
+      tubeFilter = vtk.vtkTubeFilter()
+      tubeFilter.SetInputData(linesPolyData)
+      tubeFilter.SetRadius(1)
+      tubeFilter.SetNumberOfSides(15)
+
+      glyphFilter = vtk.vtkGlyph3D()
+      glyphFilter.SetSourceConnection(cone.GetOutputPort())
+      glyphFilter.SetInputData(pointsPolyData)
+
+      modelNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLModelNode", 'Cones')
+      modelNode.CreateDefaultDisplayNodes()
+      modelDisplay = modelNode.GetDisplayNode()
+      # modelDisplay.SetAndObserveColorNodeID('vtkMRMLColorTableNodeFileViridis.txt')
+      #modelDisplay.SetAndObserveColorNodeID(
+      #    "vtkMRMLColorTableNodeFileColdToHotRainbow.txt"
+      #)
+      # Color table names can be found at https://apidocs.slicer.org/master/classvtkMRMLColorLogic.html
+      # I found that changing the color using the Model display node GUI crashes slicer, I don't know why
+      #modelDisplay.SetScalarVisibility(True)
+      #modelDisplay.SetActiveScalarName("Colors")
+
+      # Connect to glyph output
+      modelNode.SetPolyDataConnection(glyphFilter.GetOutputPort())
+
+      # Lines version
+      modelNode2 = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLModelNode', 'Tube')
+      modelNode2.CreateDefaultDisplayNodes()
+      modelNode2.SetPolyDataConnection(tubeFilter.GetOutputPort())
+      return modelNode, modelNode2
+
+
+  def trimPathToRange(self, markupsNode, startIdx, endIdx, outputMarkupsNode=None):
+      """
+      """
+      import numpy as np
+      if outputMarkupsNode is None:
+          outName = slicer.mrmlScene.GenerateUniqueName(markupsNode.GetName()+'_trimmed')
+          outputMarkupsNode = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLMarkupsCurveNode',outName)
+      arr = slicer.util.arrayFromMarkupsControlPoints(markupsNode)
+      slicer.util.updateMarkupsControlPointsFromArray(outputMarkupsNode, arr[startIdx:(endIdx+1),:])
+      return outputMarkupsNode
+
+
+  def identifyTrackingRunsFromRawPath(self, markupsNode, segmentationNode, entryRegionName='entryZone', deeperRegionName='deeperZone'):
+      """ This function should take a markupsNode and process it's control points to trim out unnecessary
+      points from before entering the nose and after exiting the nose.  To count as a run, perhaps it should 
+      have points both in an "entry" region, and a "deeper" region.  Typical runs would start outside the 
+      "entry" zone, enter the entry zone, move onto the "deeper" zone, and finally move back through the "entry" 
+      zone and out.  However, it should also handle the cases where recording starts already in the "deeper" 
+      region. A run start has the following characteristics:
+      1. The first recorded point if it is in the deeperZone.  OR The first recorded point which is in the entryZone 
+      and which is followed a continuous series of points which are in the entryZone and which is then followed by
+      at least one point in the deeperZone before any points which are neither in the entryZone nor the deeperZone.
+      A run ends at the first point after a run has started which is outside the entryZone and deeperZone.  After a 
+      run is identified and ended, another run may be present.  Notes should announce when there are events when .
+      Another way to think about this would be that every deeperZone point should be part of run, and that run should 
+      include any leading or trailing entryZone points connected to it. 
+      A list of "run" groupings should be returned.  A run grouping is a list which has information on all the control
+      point loctations in the run, along with a matching list of indices into the original control points (to allow 
+      time-stamp recovery)
+      """
+      import numpy as np
+      runsData = []
+      points = slicer.util.arrayFromMarkupsControlPoints(markupsNode)
+      nPoints = points.shape[0]
+      segmentNames = self.getSegmentNamesAtRasPoint(segmentationNode, points)
+      # Make a mask of deeperZone points and entryZone points
+      deepMask = np.zeros((nPoints))
+      entryMask = np.zeros((nPoints))
+      for idx, point in enumerate(points):
+          segNamesNow = segmentNames[idx]
+          deepMask[idx] = 1 if deeperRegionName in segNamesNow else 0
+          entryMask[idx] = 1 if entryRegionName in segNamesNow else 0
+      
+      # Make a mask of entryZone points
+      # Identify the first deeperZone point
+      # If no deeperZone points, no runs
+      if np.all(deepMask==0):
+          logging.info(f'No runs present in {markupsNode.GetName()} because no points are inside {deeperRegionName} segment!')
+          return []
+      
+      while np.any(deepMask==1):
+          # Find first deep point index
+          firstDeepIdx = np.argmax(deepMask)
+          # Run backwards to find the first contiguous point which is still in either entry or deeper zone
+          startIdx = firstDeepIdx
+          while True:
+              if startIdx==0 or ((deepMask[startIdx-1] != 1) and (entryMask[startIdx-1] != 1)):
+                  # This startIdx is the final one
+                  break
+              else:
+                  # Decrement 
+                  startIdx = startIdx - 1
+          # Run forwards to find the last contiguous point which is still in either entry or deeper zone
+          lastIdx = firstDeepIdx
+          while True:
+              if lastIdx==len(deepMask)-1 or ((deepMask[lastIdx+1] != 1) and (entryMask[lastIdx+1] != 1)):
+                  break
+              else: 
+                  # increment
+                  lastIdx = lastIdx + 1
+          # Store data
+          runData = [startIdx, lastIdx]
+          logging.debug(f'Run identified from index {startIdx} to {lastIdx}.')
+          runsData.append([runData])
+          # Clear this run from deepMask
+          deepMask[startIdx:(lastIdx+1)] = 0
+      return runsData
+
+  def getSegmentNamesAtRasPoint(self, segmentationNode,rasPoints=[[0,0,0],[1,1,1]], includeHiddenSegments=False, sliceViewLabel='Red'):
+      """ Returns names of segments at the rasPoint location.  If includeHiddenSegments is false (default)
+      then only currently visible segments (in the first display node) will be included as possible outputs. 
+      If changed to true, then all segments will be included, regardless of current visibility. It is possible 
+      to specify which slice you want to do the query in by specifying a different sliceViewLabel.  I have not
+      tested whether the slice view needs to be included in the current layout or if it needs to be visible.
+      rasPoints can be a list of 3 element lists or an nx3 numpy array.
+      
+      Important NOTE: GetVisibleSegmentsForPosition() only identifies segments which are VISIBLE and are IN THE SLICE PLANE of 
+      the selected slice view label.  It is not good enough that the segmentation visibility is turned
+      on there, the segment itself must show up in that slice plane (though it doesn't seem to need to
+      actually be showing on the screen; for example, if you zoom in or pan that segment off the side of 
+      the slice view it still works, but if you scroll away to a slice plane which does not contain the 
+      segment it does not work). This function gets around that limitation by 1) jumping the slice view
+      to the plane containing the rasPoint and 2) creating a temporary segmentation display node which 
+      ensures that the segmentation is visible in the selected slice view.
+      """
+      ##sliceNode = slicer.mrmlScene.GetNodeByID(f'vtkMRMLSliceNode{sliceViewLabel}')
+      sliceViewWidget = slicer.app.layoutManager().sliceWidget(sliceViewLabel)
+      # Store the old offset so that we can reset to this after jumping
+      sliceNode = sliceViewWidget.mrmlSliceNode()
+      oldOffset = sliceNode.GetSliceOffset()
+      # Ensure segmentation is visible in this slice widget (otherwise the list will never return any segment names)
+      tempDisplayNode = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLSegmentationDisplayNode')
+      if not includeHiddenSegments:
+          # Copy everything (crucially, including current segment visibility settings)
+          tempDisplayNode.Copy(segmentationNode.GetDisplayNode()) 
+          # If this is not done, all segments are visible by default, and therefore will be included in the output
+      tempDisplayNode.SetVisibility3D(0) # no need to show in 3D
+      tempDisplayNode.SetVisibility2D(1)
+      tempDisplayNode.SetViewNodeIDs((sliceNode.GetID(),))
+      tempDisplayNode.SetVisibility(1)
+      segmentationNode.AddAndObserveDisplayNodeID(tempDisplayNode.GetID())
+      
+      segmentationsDisplayableManager = sliceViewWidget.sliceView().displayableManagerByClassName("vtkMRMLSegmentationsDisplayableManager2D")
+      # Loop over ras points
+      segmentNames = []
+      nPoints = len(rasPoints)
+      for pointIdx in range(nPoints):
+          rasPoint = rasPoints[pointIdx]
+          # Jump to slice containing query point
+          sliceNode.JumpSliceByOffsetting(*rasPoint)
+          # Get list of segment names at that point
+          segmentIds = vtk.vtkStringArray()
+          segmentationsDisplayableManager.GetVisibleSegmentsForPosition(rasPoint, tempDisplayNode, segmentIds)
+          segmentNamesForCurrentPoint = [segmentationNode.GetSegmentation().GetSegment(segmentIds.GetValue(idx)).GetName()  for idx in range(segmentIds.GetNumberOfValues())]
+          segmentNames.append(segmentNamesForCurrentPoint)
+      # Restore prior state
+      sliceNode.SetSliceOffset(oldOffset)
+      segmentationNode.RemoveNthDisplayNodeID(segmentationNode.GetNumberOfDisplayNodes()-1)
+      return segmentNames
+
+  def mhaTesting(self, mhaFile=None):
+      if mhaFile is None:
+          #mhaFile = r'C:\Users\mikeb\Downloads\ExampleGuideletRec-20230601-113809.mhd'
+          mhaFile = r"C:/Users/mikeb/Downloads/MayaTanyaRunsData/MayaTanyaRunsData/ExampleGuideletRec-20230602-083158.mhd"
+          #mhaFile = r"C:/Users/mikeb/Downloads/MayaTanyaRunsData/MayaTanyaRunsData/ExampleGuideletRec-20230602-073923.mhd"
+          #mhaFile = r'C:\Users\mikeb\Downloads\ExampleGuideletRec-20230602-080018.mhd'
+          #mhaFile = r'C:/Users/mikeb/Downloads/Recording.igs20230524_103059.mha'
+      timeStamps, headSensorTransforms, scopeSensorTransforms = self.import_tracker_recording(mhaFile)
+      # Set up the hierarchy order 
+      transformsList = self.gatherTestingTransforms()
+      transformsList[1] = headSensorTransforms
+      transformsList[2] = scopeSensorTransforms
+      positions = self.positions_from_transform_hierarchy(transformsList)
+      curveNode = self.markupsCurveFromPositions(positions)
+
+      return timeStamps, curveNode, positions, headSensorTransforms, scopeSensorTransforms
+  
+  def gatherTestingTransforms(self):
+      """Requires tracking example 2 scene loaded"""
+      """ 
+      HeadSensorToHeadSTL 
+      -> EmTrackerToHeadSenso (tracked) 
+          -> StylusSensorToEmTrac (tracked)
+            -> NeedleTipToStylusSen (currently just rotation of axes)
+                -> extra (to allow for adjustment of tip translation between sensor and camera)
+                  -> NeedleModel
+      """
+      from slicer.util import getNode
+      import numpy as np
+      headSToStlNode = getNode('HeadSensorToHeadSTL')
+      TrToHeadS = getNode('EmTrackerToHeadSenso')
+      ScopeSToTr = getNode('StylusSensorToEmTrac')
+      ScopeTipToScopeS = getNode('NeedleTipToStylusSen')
+      ExtraTipAdjustment = getNode('extra')
+      TNodeList = [headSToStlNode, TrToHeadS, ScopeSToTr, ScopeTipToScopeS, ExtraTipAdjustment]
+      transformList = [slicer.util.arrayFromTransformMatrix(TNode) for TNode in TNodeList]
+      return transformList
+
+
+  def markupsCurveFromPositions(self, positions):
+      """Create markupsCurveNode from Nx3 numpy array"""
+      pathName = slicer.mrmlScene.GenerateUniqueName('Path')
+      curveNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLMarkupsCurveNode", pathName)
+      slicer.util.updateMarkupsControlPointsFromArray(curveNode, positions)
+      return curveNode
+
+
+  def positions_from_transform_hierarchy(self, transformsList):
+      """Compute series of locations given a list of hierarchical transform matrices. 
+      transformsList[i] must either be a single 4x4 array or a 4x4xN array, where N is 
+      the number of time step frames. transformsList[i] is the parent transform to 
+      transformsList[i+1]
+      """
+      import numpy as np
+      
+      numFramesPer = np.zeros((len(transformsList)),dtype=int)
+      for idx, tListItem in enumerate(transformsList):
+          numDims = tListItem.ndim
+          if numDims==3:
+              numFramesPer[idx] = tListItem.shape[2]
+          elif numDims==2:
+              numFramesPer[idx] = 1
+      # NumFramesPer elements should now all either equal 1 or the same number of frames
+      numFrames = np.max(numFramesPer)
+      assert np.all((numFramesPer==1) | (numFramesPer==numFrames) ), 'All transforms supplied must have either a single frame or the same number of frames!'        
+      # Calculate positions from the sequence of transforms
+      positions = np.zeros((numFrames, 3))
+      #offset_positions = []
+      origin = np.zeros((4))
+      origin[3] = 1 # homogenous coordinate for a point
+      concatTransforms = []
+      for frameNum in range(numFrames):
+          # Assemble the correct list of transforms for this frame
+          currentTransformList = []
+          for listIdx in range(len(transformsList)):
+              if numFramesPer[listIdx]==1:
+                  curTransform = transformsList[listIdx]
+              else:
+                  curTransform = transformsList[listIdx][:, :, frameNum]
+              currentTransformList.append(curTransform)
+          # Apply tranforms in order to origin position
+          concatTransform = np.linalg.multi_dot(currentTransformList)
+          concatTransforms.append(concatTransform)
+          currentPosition4 = concatTransform @ origin
+          positions[frameNum,:] = currentPosition4[0:3]
+      return positions
+
+
+  def import_tracker_recording(self, mha_file_path):
+      """Import the sequence of transforms stored in one of the guidelet mhd files.
+      """
+      import numpy as np
+      import re
+      logging.debug(f'Opening file: {mha_file_path} ...')
+      # Just parse far enough to get number of timesteps
+      numSeqFrames = 0
+      with open(mha_file_path) as f:
+          for line in f:
+              if line.startswith('DimSize'):
+                  numSeqFrames = int(line.rstrip().split()[-1])
+                  logging.debug(f'Found DimSize line: {numSeqFrames} time steps in file')
+                  break
+      if numSeqFrames==0:
+          raise(Exception('DimSize line not found in mha file processing, cannot determine number of processed time steps.'))
+      # Preallocate transform arrays
+      timeStamps = np.zeros((numSeqFrames))
+      headSensorTransforms = np.zeros((4,4,numSeqFrames))
+      scopeSensorTransforms = np.zeros((4,4,numSeqFrames))
+      # Sequence line info pattern
+      transformLinePatt = re.compile(r'Seq_Frame(?P<frameNumber>\d\d\d\d)_(?P<transformName>\w+) =(?P<matrix>( -?\d+(\.\d+)?([Ee][+-]?\d+)?){16})')
+      timeStampLinePatt = re.compile(r'Seq_Frame(?P<frameNumber>\d\d\d\d)_Timestamp = (?P<timeStamp>-?\d+(\.\d+)?)')
+      # Read the file line by line
+      with open(mha_file_path) as f:
+          keepgoing = True
+          for line in f:
+              if m := transformLinePatt.search(line):
+                  # Process the result
+                  groupDict = m.groupdict()
+                  #logging.debug(groupDict.__str__())
+                  frameNum = int(groupDict['frameNumber'])
+                  transformName = groupDict['transformName']
+                  transformMatrixList = groupDict['matrix'].lstrip().split() # row order 
+                  transformMatrix = np.array(transformMatrixList).reshape((4,4))
+                  # Store in arrays
+                  if re.search('Head', transformName):
+                      headSensorTransforms[:,:,frameNum] = np.linalg.inv(transformMatrix.astype('float64'))  # THESE NEED TO BE INVERTED!!!
+                  elif re.search('Stylus', transformName):
+                      scopeSensorTransforms[:,:,frameNum] = transformMatrix
+              if m := timeStampLinePatt.search(line):
+                  groupDict = m.groupdict()
+                  frameNum = int(groupDict['frameNumber'])
+                  timeStamp = float(groupDict['timeStamp'])
+                  timeStamps[frameNum] = timeStamp
+      return timeStamps, headSensorTransforms, scopeSensorTransforms
+
   def createVolumeFromROIandVoxelSize(
         self, ROINode, voxelSizeMm=[1.0, 1.0, 1.0], prioritizeVoxelSize=True
     ):
