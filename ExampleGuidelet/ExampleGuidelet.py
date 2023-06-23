@@ -92,6 +92,9 @@ class ExampleGuideletWidget(GuideletWidget):
         self.plusRemoteNode.SetCurrentCaptureID(self.captureDeviceName)
         self.plusRemoteLogic.StopRecording(self.plusRemoteNode)
 
+HEAD_SENSOR_TRANSFORM_POSITION_IN_HIERARCHY = 1
+SCOPE_SENSOR_TRANSFORM_POSITION_IN_HIERARCHY = 2
+DEFAULT_LEAF_TRANSFORM_NODE_NAME = 'Extra'
 
 class ExampleGuideletLogic(GuideletLogic):
   """Uses GuideletLogic base class, available at:
@@ -110,23 +113,129 @@ class ExampleGuideletLogic(GuideletLogic):
       """
       timeStamps, headSensorTransforms, scopeSensorTransforms = self.import_tracker_recording(mhaFile)
       # Set up the hierarchy order 
-      transformsList = self.gatherTestingTransforms()
-      transformsList[1] = headSensorTransforms
-      transformsList[2] = scopeSensorTransforms
+      #transformsList = self.gatherTestingTransforms()
+      leafNodeName = DEFAULT_LEAF_TRANSFORM_NODE_NAME # TODO: don't hard code this!!
+      leafTransformNode = slicer.util.getNode(leafNodeName)
+      transformNames, transformsList = self.gatherTransformsFromTransformHierarchy(leafTransformNode)
+      # TODO: Verify that transformNames[1] looks like it's the dynamic head sensor and [2] looks like the dynamic scope sensor
+      # Replace the single transform matrix arrays in transformsList with the full set from 
+      # the loaded file for both the head sensor and scope sensor
+      transformsList[HEAD_SENSOR_TRANSFORM_POSITION_IN_HIERARCHY] = headSensorTransforms
+      transformsList[SCOPE_SENSOR_TRANSFORM_POSITION_IN_HIERARCHY] = scopeSensorTransforms
       # Get sequence of locations in RAS space
-      positions = self.positions_from_transform_hierarchy(transformsList)
-      rawPathModelNode = self.modelNodeFromPositions(positions)
+      positions, orientations = self.positions_from_transform_hierarchy(transformsList)
+      rawPathModelNode = None #self.modelNodeFromPositions(positions)
       #rawCurveNode = self.markupsCurveFromPositions(positions)
       # Gather runs data
       runsData = self.identifyTrackingRunsFromRawPath(positions, segmentationNode)
       pathRunsModelNodes = []
       for runData in runsData:
           startIdx, endIdx = runData
-          runPositions = runData[startIdx:(endIdx+1),:] # NOTE: NOT a deep copy
+          runPositions = positions[startIdx:(endIdx+1),:] # NOTE: NOT a deep copy
+          runOrientations = orientations[startIdx:(endIdx+1),:]
           #self.trimPathToRange(positions, startIdx, endIdx)
-          pathRunModelNode = self.modelNodeFromPositions(runPositions)
+          pathRunModelNode = self.modelNodeFromPositionsAndOrientations(runPositions, runOrientations)
           pathRunsModelNodes.append(pathRunModelNode)
-      return 
+      return pathRunsModelNodes, rawPathModelNode
+
+  def modelNodeFromPositionsAndOrientations(self, positions, orientations):
+      """Create model node with polydata (for non-interactive version of markups)
+      Helpful links: 
+      https://www.dillonbhuff.com/?p=540
+      https://vtk.org/doc/release/5.0/html/a01880.html#:~:text=vtkPolyData%20is%20a%20data%20object,also%20are%20represented.
+      """
+      import numpy as np
+      # Create VTK arrays needed for model node
+      points = vtk.vtkPoints() # actual pointData locations
+      vertices = vtk.vtkCellArray() # handles vertex locations (in our case this will just be all the points, but note that
+      # points could be a superset of vertices because points could include the endpoints of lines or corners of polygons 
+      # which don't themselves have to be in the list of vertices.  Vertices are what the vtkGlyph3D filter operates on
+      lines = vtk.vtkCellArray() # handles lines (and same type would handle polygons if those were being used)
+
+      pointsArray = positions # an nx3 numpy array
+      numPoints = pointsArray.shape[0]
+      diffs = np.diff(pointsArray, axis=0)
+
+      vectors = vtk.vtkFloatArray() # this will affect glyph orientation and is going to be set to the vector to the next point
+      vectors.SetNumberOfComponents(3)
+      vectors.SetName("Directions")
+
+      #sizes = vtk.vtkFloatArray() # this will go in scalars 
+      #sizes.SetName("Sizes")
+      #colors = vtk.vtkFloatArray()
+      #colors.SetName("Colors")
+      vectors = vtk.vtkFloatArray() # this will affect glyph orientation and is going to be set to the vector to the next point
+      vectors.SetNumberOfComponents(3)
+      vectors.SetName("Directions")
+
+      # Assemble arrays of values
+      for point, orientation in zip(positions,orientations):
+        pointID = points.InsertNextPoint(point)
+        # Vertices
+        cellID = vertices.InsertNextCell(1) # allocates a next cell with space for one point ID (lines would have 2, triangles 3, polygons N)
+        vertices.InsertCellPoint(pointID) # fills the first (and only) slot for this cell
+        # Vectors
+        vectorID = vectors.InsertNextTuple(orientation)
+        # Speed?? Could be calculated here and used to size the cones? TODO
+        if pointID != (numPoints-1):
+          # Add a line unless this is the very last point
+          lines.InsertNextCell(2)
+          # allocates a next cell with space for two pointIDs (the endpoints of the line)
+          lines.InsertCellPoint(pointID)
+          lines.InsertCellPoint(pointID+1)
+   
+          #size = e[i] * sizeFactor
+          #_ = sizes.InsertNextValue(size)
+          #colorIdx = cmapIndices[i]
+          #_ = colors.InsertNextValue(colorIdx)
+          
+      ## Create the vtkPolyData
+      pointsPolyData = vtk.vtkPolyData()
+      pointsPolyData.SetPoints(points)
+      pointsPolyData.SetVerts(vertices)
+      pointsPolyData.SetLines(lines)
+      pointsData = pointsPolyData.GetPointData()
+      #_ = pointsData.SetScalars(sizes)
+      _ = pointsData.SetVectors(vectors)
+      #_ = pointsData.AddArray(colors)
+
+      sphere = vtk.vtkSphereSource()  # ConeSource()
+      cone = vtk.vtkConeSource()
+      cone.SetResolution(18)
+
+      linesPolyData = vtk.vtkPolyData()
+      linesPolyData.SetPoints(points)
+      linesPolyData.SetLines(lines)
+
+      tubeFilter = vtk.vtkTubeFilter()
+      tubeFilter.SetInputData(linesPolyData)
+      tubeFilter.SetRadius(1)
+      tubeFilter.SetNumberOfSides(15)
+
+      glyphFilter = vtk.vtkGlyph3D()
+      glyphFilter.SetSourceConnection(cone.GetOutputPort())
+      glyphFilter.SetInputData(pointsPolyData)
+
+      modelNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLModelNode", 'OriCones')
+      modelNode.CreateDefaultDisplayNodes()
+      modelDisplay = modelNode.GetDisplayNode()
+      # modelDisplay.SetAndObserveColorNodeID('vtkMRMLColorTableNodeFileViridis.txt')
+      #modelDisplay.SetAndObserveColorNodeID(
+      #    "vtkMRMLColorTableNodeFileColdToHotRainbow.txt"
+      #)
+      # Color table names can be found at https://apidocs.slicer.org/master/classvtkMRMLColorLogic.html
+      # I found that changing the color using the Model display node GUI crashes slicer, I don't know why
+      #modelDisplay.SetScalarVisibility(True)
+      #modelDisplay.SetActiveScalarName("Colors")
+
+      # Connect to glyph output
+      modelNode.SetPolyDataConnection(glyphFilter.GetOutputPort())
+
+      # Lines version
+      modelNode2 = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLModelNode', 'Tube')
+      modelNode2.CreateDefaultDisplayNodes()
+      modelNode2.SetPolyDataConnection(tubeFilter.GetOutputPort())
+      return modelNode, modelNode2
 
   def modelNodeFromPositions(self, positions):
       """Create model node with polydata (for non-interactive version of markups)
@@ -247,7 +356,7 @@ class ExampleGuideletLogic(GuideletLogic):
       return outputMarkupsNode
 
 
-  def identifyTrackingRunsFromRawPath(self, markupsNode, segmentationNode, entryRegionName='entryZone', deeperRegionName='deeperZone'):
+  def identifyTrackingRunsFromRawPath(self, positionsArray, segmentationNode, entryRegionName='entryZone', deeperRegionName='deeperZone'):
       """ This function should take a markupsNode and process it's control points to trim out unnecessary
       points from before entering the nose and after exiting the nose.  To count as a run, perhaps it should 
       have points both in an "entry" region, and a "deeper" region.  Typical runs would start outside the 
@@ -264,10 +373,13 @@ class ExampleGuideletLogic(GuideletLogic):
       A list of "run" groupings should be returned.  A run grouping is a list which has information on all the control
       point loctations in the run, along with a matching list of indices into the original control points (to allow 
       time-stamp recovery)
+      TODO: Add error correction for aberrant points.  How about, if there is a gap between runs of 
+      less than 5 points, then they should just be merged into 
       """
       import numpy as np
       runsData = []
-      points = slicer.util.arrayFromMarkupsControlPoints(markupsNode)
+      #points = slicer.util.arrayFromMarkupsControlPoints(markupsNode)
+      points = positionsArray
       nPoints = points.shape[0]
       segmentNames = self.getSegmentNamesAtRasPoint(segmentationNode, points)
       # Make a mask of deeperZone points and entryZone points
@@ -282,7 +394,7 @@ class ExampleGuideletLogic(GuideletLogic):
       # Identify the first deeperZone point
       # If no deeperZone points, no runs
       if np.all(deepMask==0):
-          logging.info(f'No runs present in {markupsNode.GetName()} because no points are inside {deeperRegionName} segment!')
+          logging.info(f'No runs present because no points are inside {deeperRegionName} segment!')
           return []
       
       while np.any(deepMask==1):
@@ -308,7 +420,7 @@ class ExampleGuideletLogic(GuideletLogic):
           # Store data
           runData = [startIdx, lastIdx]
           logging.debug(f'Run identified from index {startIdx} to {lastIdx}.')
-          runsData.append([runData])
+          runsData.append(runData)
           # Clear this run from deepMask
           deepMask[startIdx:(lastIdx+1)] = 0
       return runsData
@@ -382,6 +494,23 @@ class ExampleGuideletLogic(GuideletLogic):
 
       return timeStamps, curveNode, positions, headSensorTransforms, scopeSensorTransforms
   
+  def gatherTransformsFromTransformHierarchy(self, leafTransformNode):
+    """ Use the existing scene transform hierarchy to build transformList
+    """
+    shNode = slicer.mrmlScene.GetSubjectHierarchyNode()
+    leafTransformNode.GetTransformNodeID()
+    curT = leafTransformNode
+    transformNodeList = [leafTransformNode]
+    while curT.GetTransformNodeID():
+      # Get parent transform node
+      curT = slicer.mrmlScene.GetNodeByID(curT.GetTransformNodeID())
+      transformNodeList.append(curT)
+    # Reverse order so decending hierarchy rather than ascending
+    transformNodeList.reverse()
+    transformNames = [tNode.GetName() for tNode in transformNodeList]
+    transformList = [slicer.util.arrayFromTransformMatrix(tNode) for tNode in transformNodeList]
+    return transformNames, transformList
+
   def gatherTestingTransforms(self):
       """Requires tracking example 2 scene loaded"""
       """ 
@@ -432,9 +561,12 @@ class ExampleGuideletLogic(GuideletLogic):
       assert np.all((numFramesPer==1) | (numFramesPer==numFrames) ), 'All transforms supplied must have either a single frame or the same number of frames!'        
       # Calculate positions from the sequence of transforms
       positions = np.zeros((numFrames, 3))
-      #offset_positions = []
+      orientations = np.zeros((numFrames,3))
       origin = np.zeros((4))
       origin[3] = 1 # homogenous coordinate for a point
+      direction = np.zeros((4))
+      direction[2] = 1 # [0,0,1,0]
+      direction[3] = 0 # homogenous coord for a vector
       concatTransforms = []
       for frameNum in range(numFrames):
           # Assemble the correct list of transforms for this frame
@@ -449,8 +581,10 @@ class ExampleGuideletLogic(GuideletLogic):
           concatTransform = np.linalg.multi_dot(currentTransformList)
           concatTransforms.append(concatTransform)
           currentPosition4 = concatTransform @ origin
+          currentOrientation4 = concatTransform @ direction
           positions[frameNum,:] = currentPosition4[0:3]
-      return positions
+          orientations[frameNum,:] = currentOrientation4[0:3]
+      return positions, orientations
 
 
   def import_tracker_recording(self, mha_file_path):
@@ -855,7 +989,7 @@ class ExampleGuideletGuidelet(Guidelet):
       self.referenceToRas.SetMatrixTransformToParent(m)
       slicer.mrmlScene.AddNode(self.referenceToRas)
 
-    Guidelet.setupScene(self)
+    Guidelet.setupScene(self) # <--connection with Plus server is made here
     # Not sure why 'EmTrackerToHeadSenso' didn't exist yet, trying processing events here
     slicer.app.processEvents() 
 
@@ -896,7 +1030,12 @@ class ExampleGuideletGuidelet(Guidelet):
       self.HeadSensorToHeadSTL = slicer.util.getNode('HeadSensorToNewPegHe')
     else:
       self.HeadSensorToHeadSTL = slicer.util.getNode('HeadSensorToHeadSTL')
-
+    try:
+      self.ExtraTransform = slicer.util.getNode('Extra')
+    except slicer.util.MRMLNodeNotFoundException:
+      # Default to 6mm Z-axis offset (sensor is 6mm from tip of scope)
+      self.ExtraTransform = self.createTransformNode(translationMm=[0,0,6],transformName='Extra')
+      
     # Models
     logging.debug('Create models')
 
@@ -917,8 +1056,13 @@ class ExampleGuideletGuidelet(Guidelet):
     #self.StylusTipToStylusSensor.SetAndObserveTransformNodeID(self.StylusSensorToEmTracker.GetID())
     self.NeedleTipToStylusSensor.SetAndObserveTransformNodeID(self.StylusSensorToEmTracker.GetID())
     # NOTE Choose one of the following two lines depending on which stylus/sensor type is appropriate
-    self.needleModel.SetAndObserveTransformNodeID(self.NeedleTipToStylusSensor.GetID())
-    #self.needleModel.SetAndObserveTransformNodeID(self.StylusTipToStylusSensor.GetID())
+    usingScopeSensor = True # TODO: don't hard code this
+    if usingScopeSensor:
+      self.ExtraTransform.SetAndObserveTransformNodeID(self.NeedleTipToStylusSensor.GetID())
+      self.needleModel.SetAndObserveTransformNodeID(self.ExtraTransform.GetID())
+    else:
+      # Using stylus sensor (plastic)
+      self.needleModel.SetAndObserveTransformNodeID(self.StylusTipToStylusSensor.GetID())
 
     ## self.needleToReference.SetAndObserveTransformNodeID(self.referenceToRas.GetID())
     ## self.needleTipToNeedle.SetAndObserveTransformNodeID(self.needleToReference.GetID())
@@ -933,6 +1077,14 @@ class ExampleGuideletGuidelet(Guidelet):
     dataProbeParameterNode=dataProbeUtil.getParameterNode()
     dataProbeParameterNode.SetParameter('showSliceViewAnnotations', '0')
 
+  def createTransformNode(self, translationMm=[0,0,0],transformName='CreatedTransform'):
+    """ Create a simple translation-only linear transform node from scratch """
+    import numpy as np
+    transformNode = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLLinearTransformNode',transformName)
+    transformMatrix = np.eye(4,dtype=float)
+    transformMatrix[0:3,3] = translationMm
+    transformNode.SetAndObserveMatrixTransformToParent(slicer.util.vtkMatrixFromArray(transformMatrix))
+    return transformNode
 
   def disconnect(self):#TODO see connect
     logging.debug('ScoliUs.disconnect()')
