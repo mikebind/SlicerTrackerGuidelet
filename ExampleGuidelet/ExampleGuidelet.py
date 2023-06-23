@@ -134,17 +134,30 @@ class ExampleGuideletLogic(GuideletLogic):
           runPositions = positions[startIdx:(endIdx+1),:] # NOTE: NOT a deep copy
           runOrientations = orientations[startIdx:(endIdx+1),:]
           #self.trimPathToRange(positions, startIdx, endIdx)
-          pathRunModelNode = self.modelNodeFromPositionsAndOrientations(runPositions, runOrientations)
+          pathRunModelNode = self.modelNodeFromPositionsAndOrientations(runPositions, runOrientations, scalars=None, sizeFactor=2.0)
           pathRunsModelNodes.append(pathRunModelNode)
       return pathRunsModelNodes, rawPathModelNode
 
-  def modelNodeFromPositionsAndOrientations(self, positions, orientations):
+  def modelNodeFromPositionsAndOrientations(self, positions, orientations, scalars=None, sizeFactor=2.0):
       """Create model node with polydata (for non-interactive version of markups)
       Helpful links: 
       https://www.dillonbhuff.com/?p=540
       https://vtk.org/doc/release/5.0/html/a01880.html#:~:text=vtkPolyData%20is%20a%20data%20object,also%20are%20represented.
       """
+      # TODO: Add velocities (size), deviations from expert (color)?
       import numpy as np
+      pointsArray = positions # an nx3 numpy array
+      numPoints = pointsArray.shape[0]
+      #diffs = np.diff(pointsArray, axis=0)
+      # Expand scalars to array if needed 
+      if scalars is None:
+        scalars = np.ones(numPoints)
+      elif isinstance(scalars, (list, tuple, np.ndarray)) and len(scalars)==1:
+        scalars = scalars[0] * np.ones(numPoints)
+      else:
+        # Single value not in a list
+        scalars = scalars * np.ones(numPoints)
+
       # Create VTK arrays needed for model node
       points = vtk.vtkPoints() # actual pointData locations
       vertices = vtk.vtkCellArray() # handles vertex locations (in our case this will just be all the points, but note that
@@ -152,24 +165,19 @@ class ExampleGuideletLogic(GuideletLogic):
       # which don't themselves have to be in the list of vertices.  Vertices are what the vtkGlyph3D filter operates on
       lines = vtk.vtkCellArray() # handles lines (and same type would handle polygons if those were being used)
 
-      pointsArray = positions # an nx3 numpy array
-      numPoints = pointsArray.shape[0]
-      diffs = np.diff(pointsArray, axis=0)
+      
 
       vectors = vtk.vtkFloatArray() # this will affect glyph orientation and is going to be set to the vector to the next point
       vectors.SetNumberOfComponents(3)
       vectors.SetName("Directions")
 
-      #sizes = vtk.vtkFloatArray() # this will go in scalars 
-      #sizes.SetName("Sizes")
+      sizes = vtk.vtkFloatArray() # this will go in scalars 
+      sizes.SetName("Sizes")
       #colors = vtk.vtkFloatArray()
-      #colors.SetName("Colors")
-      vectors = vtk.vtkFloatArray() # this will affect glyph orientation and is going to be set to the vector to the next point
-      vectors.SetNumberOfComponents(3)
-      vectors.SetName("Directions")
+      #colors.SetName("Colors"
 
       # Assemble arrays of values
-      for point, orientation in zip(positions,orientations):
+      for point, orientation, scalar in zip(positions,orientations,scalars):
         pointID = points.InsertNextPoint(point)
         # Vertices
         cellID = vertices.InsertNextCell(1) # allocates a next cell with space for one point ID (lines would have 2, triangles 3, polygons N)
@@ -177,13 +185,14 @@ class ExampleGuideletLogic(GuideletLogic):
         # Vectors
         vectorID = vectors.InsertNextTuple(orientation)
         # Speed?? Could be calculated here and used to size the cones? TODO
+        sizes.InsertNextValue(scalar * sizeFactor)
         if pointID != (numPoints-1):
           # Add a line unless this is the very last point
           lines.InsertNextCell(2)
           # allocates a next cell with space for two pointIDs (the endpoints of the line)
           lines.InsertCellPoint(pointID)
           lines.InsertCellPoint(pointID+1)
-   
+          
           #size = e[i] * sizeFactor
           #_ = sizes.InsertNextValue(size)
           #colorIdx = cmapIndices[i]
@@ -195,7 +204,7 @@ class ExampleGuideletLogic(GuideletLogic):
       pointsPolyData.SetVerts(vertices)
       pointsPolyData.SetLines(lines)
       pointsData = pointsPolyData.GetPointData()
-      #_ = pointsData.SetScalars(sizes)
+      _ = pointsData.SetScalars(sizes)  #scalars are literally used as size scale factors, I think
       _ = pointsData.SetVectors(vectors)
       #_ = pointsData.AddArray(colors)
 
@@ -209,7 +218,7 @@ class ExampleGuideletLogic(GuideletLogic):
 
       tubeFilter = vtk.vtkTubeFilter()
       tubeFilter.SetInputData(linesPolyData)
-      tubeFilter.SetRadius(1)
+      tubeFilter.SetRadius(0.5)
       tubeFilter.SetNumberOfSides(15)
 
       glyphFilter = vtk.vtkGlyph3D()
