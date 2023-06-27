@@ -155,7 +155,7 @@
     </widget>
    </item>
    <item>
-    <widget class="ctkCollapsibleButton" name="CollapsibleButton">
+    <widget class="ctkCollapsibleButton" name="RunTrackingCB">
      <property name="text">
       <string>Run Tracking</string>
      </property>
@@ -171,7 +171,7 @@
     </widget>
    </item>
    <item>
-    <widget class="ctkCollapsibleButton" name="CollapsibleButton_2">
+    <widget class="ctkCollapsibleButton" name="ReviewTrackedRunsCB">
      <property name="text">
       <string>Review Tracked Runs</string>
      </property>
@@ -191,7 +191,7 @@
        </widget>
       </item>
       <item row="0" column="1">
-       <widget class="ctkComboBox" name="ComboBox_3">
+       <widget class="ctkComboBox" name="RunToReviewComboBox">
         <item>
          <property name="text">
           <string>* no recorded runs yet for this session * </string>
@@ -200,7 +200,7 @@
        </widget>
       </item>
       <item row="1" column="1">
-       <widget class="ctkComboBox" name="ComboBox_4">
+       <widget class="ctkComboBox" name="ExpertRunToCompareComboBox">
         <item>
          <property name="text">
           <string>ExpertRun1_LeftNostril</string>
@@ -214,7 +214,7 @@
        </widget>
       </item>
       <item row="2" column="1">
-       <widget class="QPushButton" name="pushButton_3">
+       <widget class="QPushButton" name="DisplaySelectedRunButton">
         <property name="text">
          <string>Display Selected Runs</string>
         </property>

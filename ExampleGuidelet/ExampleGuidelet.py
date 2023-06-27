@@ -73,8 +73,8 @@ class ExampleGuideletWidget(GuideletWidget):
       self.startStopRecordingButton.setToolTip("Recording is being started...")
       if self.captureDeviceName  != '':
         # Important to save as .mhd because that does not require lengthy finalization (merging into a single file)
-        recordPrefix = self.guideletParent.parameterNode.GetParameter('RecordingFilenamePrefix')
-        recordExt = self.guideletParent.parameterNode.GetParameter('RecordingFilenameExtension')
+        recordPrefix = self.parameterNode.GetParameter('RecordingFilenamePrefix')
+        recordExt = self.parameterNode.GetParameter('RecordingFilenameExtension')
         self.recordingFileName =  recordPrefix + time.strftime("%Y%m%d-%H%M%S") + recordExt
 
         logging.info("Starting recording to: {0}".format(self.recordingFileName))
@@ -104,9 +104,37 @@ class ExampleGuideletLogic(GuideletLogic):
   def __init__(self, parent = None):
     GuideletLogic.__init__(self, parent)
 
-  def createSessionFile(self, headerText, parameterNode):
-     pass
+  def createSessionFile(self, headerList, currentSessionFilePath):
+    """Create a file to hold the results of a session for a single user.  This should be
+    called whenever new user information is saved.  Whenever recordings are started/finished,
+    a line should be added to the session file saying where the file is saved and what the 
+    file name is."""
+    lines = [*headerList,'---'] # add a '---' line as a delimiter
+    with open(currentSessionFilePath, 'w') as f:
+       f.writelines(f"{line}\n" for line in lines) 
+    return 
   
+  def appendToSessionFile(self, textToAppend, sessionFilePath):
+    """Append supplied text to the given file, adding a newline at the end
+    """
+    with open(sessionFilePath, 'a') as f:
+       f.write(f"{textToAppend}\n")
+    return
+
+  def getListOfRunsFromSessionFile(self, sessionFilePath, delimiterLine='---\n'):
+    """Process session file to a list of recordings file names"""
+    with open(sessionFilePath,'r') as f:
+      lines = f.readlines() # newlines are not removed!
+    # Find end of header
+    delimIdx = lines.index(delimiterLine)
+    # Make list of runs (after header and stripped of newline)
+    listOfRuns = [line.rstrip() for line in lines[delimIdx+1:]]
+    return listOfRuns
+
+  def constructCurrentSessionFilePath(self, sessionDirectory, sessionFilePrefix, userName):
+    timeStamp = time.strftime(r"%Y-%m-%d-%H%M%S")
+    currentSessionFilePath = os.path.join(sessionDirectory, f"{sessionFilePrefix}{userName.replace(' ','_')}-{timeStamp}.txt")
+    return currentSessionFilePath
 
   # Next goal - write test to process multiple files and crop them to just inside paths
   def processTrackerFileToRuns(self, mhaFile, segmentationNode, entryRegionName='entryZone', deeperRegionName='deeperZone'):
@@ -896,13 +924,16 @@ class ExampleGuideletLogic(GuideletLogic):
   def addValuesToDefaultConfiguration(self):
     GuideletLogic.addValuesToDefaultConfiguration(self)
     moduleDir = os.path.dirname(slicer.modules.exampleguidelet.path)
+    defaultUserSessionsSavePath = os.path.join(moduleDir, 'UserSessionResults')
     defaultSceneSavePath = os.path.join(moduleDir, 'SavedScenes')
     moduleDirectoryPath = slicer.modules.exampleguidelet.path.replace('ExampleGuidelet.py','')
     settingList = {
                    'StyleSheet' : moduleDirectoryPath + 'Resources/StyleSheets/ExampleGuideletStyle.qss',
                    'LiveUltrasoundNodeName': 'Image_Reference',
                    'TestMode' : 'False',
-                   'RecordingFilenamePrefix' : 'ExampleGuideletRec-',
+                   'RecordingFilenamePrefix' : 'AirwayTrackerRec-',
+                   'UserSessionResultsDirectory': defaultUserSessionsSavePath, # folder to put session files in
+                   'SessionFilePrefix' : 'Session-',
                    'SavedScenesDirectory': defaultSceneSavePath, #overwrites the default setting param of base
                    }
     self.updateSettings(settingList, 'Default')
@@ -1071,9 +1102,18 @@ class ExampleGuideletGuidelet(Guidelet):
     roleText = self.parameterNode.GetParameter('roleComboBoxCurrentText')
     if not roleText:
        roleText = '*not set*'
+    self.parameterNode.SetParameter('CurrentUserRoleText', roleText)
     self.currentRoleLabel.text = roleText
     # Create Session File to hold results
-    self.currentSessionFile = self.logic.createSessionFile(headerList=[userText, experienceText, roleText])
+    sessionDirectory = self.parameterNode.GetParameter('UserSessionResultsDirectory')
+    sessionFilePrefix = self.parameterNode.GetParameter('SessionFilePrefix')
+    userName = self.parameterNode.GetParameter('CurrentUserText')
+    self.currentSessionFilePath = self.logic.constructCurrentSessionFilePath(sessionDirectory, sessionFilePrefix, userName)
+    self.logic.createSessionFile(headerList=[userText, experienceText, roleText], currentSessionFilePath=self.currentSessionFilePath)
+    self.parameterNode.SetParameter('CurrentSessionFilePath', self.currentSessionFilePath)
+    # Clear out RunsData for previous session
+    self.logic.updateRunsDataListFromSessionFile(self.currentSessionFilePath)
+    self.parameterNode.SetParameter('RunsData')
 
   def onStartStopRecordingClicked(self):
     self.captureDeviceName = self.parameterNode.GetParameter('PLUSCaptureDeviceName')
@@ -1085,9 +1125,16 @@ class ExampleGuideletGuidelet(Guidelet):
         # Important to save as .mhd because that does not require lengthy finalization (merging into a single file)
         recordPrefix = self.parameterNode.GetParameter('RecordingFilenamePrefix')
         recordExt = self.parameterNode.GetParameter('RecordingFilenameExtension')
-        self.recordingFileName =  recordPrefix + time.strftime("%Y%m%d-%H%M%S") + recordExt
+        userName = self.parameterNode.GetParameter('CurrentUserText')
+        userExp = self.parameterNode.GetParameter('CurrentUserExperienceLevelText')
+        userRole = self.parameterNode.GetParameter('CurrentUserRoleText')
+        timeStamp = time.strftime(r"%Y-%m-%d-%H%M%S")
+        self.recordingFileName = f"{recordPrefix}{userName}-{userExp}-{userRole}-{timeStamp}{recordExt}".replace(' ','_') # replace spaces with underscores
+        #self.recordingFileName =  recordPrefix + time.strftime("%Y%m%d-%H%M%S") + recordExt
 
         logging.info("Starting recording to: {0}".format(self.recordingFileName))
+
+        self.logic.appendToSessionFile(self.recordingFileName, self.currentSessionFilePath)
 
         self.plusRemoteNode.SetCurrentCaptureID(self.captureDeviceName)
         self.plusRemoteNode.SetRecordingFilename(self.recordingFileName)
@@ -1101,8 +1148,18 @@ class ExampleGuideletGuidelet(Guidelet):
         logging.info("Stopping recording")
         self.plusRemoteNode.SetCurrentCaptureID(self.captureDeviceName)
         self.plusRemoteLogic.StopRecording(self.plusRemoteNode)
+        # Add the current run to the current dropdown list of RunsData. TODO!
+        listOfRuns = self.logic.getListOfRunsFromSessionFile(self.currentSessionFilePath)
+        self.updateRunsToReview(listOfRuns)
 
-
+  def updateRunsToReview(self, listOfRuns):
+    """From a list of runs (filenames of recordings), update the dropdown"""
+    # Remove all items
+    self.RunToReviewComboBox.clear()
+    if listOfRuns:
+      for runFileName in listOfRuns:
+        self.runToReviewComboBox.addItem(runFileName)
+    
 
   def setupScene(self): #applet specific
     logging.debug('ExampleGuideletGuidelet.setupScene')
@@ -1294,6 +1351,10 @@ class ExampleGuideletGuidelet(Guidelet):
     self.currentUserNameLabel = loadedUI.CurrentUserNameLabel
     self.currentExperienceLevelLabel = loadedUI.CurrentExperienceLevelLabel
     self.currentRoleLabel = loadedUI.CurrentRoleLabel
+
+    self.runToReviewComboBox = loadedUI.RunToReviewComboBox
+    self.expertRunToCompareComboBox = loadedUI.ExpertRunToCompareComboBox
+    self.displaySelectedRunButton = loadedUI.DisplaySelectedRunButton
 
     ##
     """
