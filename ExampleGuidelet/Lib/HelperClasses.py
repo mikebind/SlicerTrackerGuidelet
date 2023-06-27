@@ -27,6 +27,7 @@ class Session(object):
         delimLine = "---" # delimiter line separating header from the rest
         recordingsLines = [recObj.recordingFilePath for recObj in self.listOfRecordings]
         saveFileText = "\n".join([*headerTextList,delimLine,*recordingsLines]) +"\n"
+        return saveFileText
 
     def getSaveFileName(self):
         logging.debug('Session.getSaveFileName()')
