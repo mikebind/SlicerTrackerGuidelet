@@ -1,0 +1,249 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>TrackerUI</class>
+ <widget class="qMRMLWidget" name="TrackerUI">
+  <property name="geometry">
+   <rect>
+    <x>0</x>
+    <y>0</y>
+    <width>417</width>
+    <height>561</height>
+   </rect>
+  </property>
+  <property name="windowTitle">
+   <string>Form</string>
+  </property>
+  <layout class="QVBoxLayout" name="verticalLayout">
+   <item>
+    <layout class="QFormLayout" name="formLayout_2">
+     <property name="bottomMargin">
+      <number>4</number>
+     </property>
+     <item row="0" column="0">
+      <widget class="QLabel" name="label_4">
+       <property name="text">
+        <string>Current User</string>
+       </property>
+      </widget>
+     </item>
+     <item row="1" column="0">
+      <widget class="QLabel" name="label_5">
+       <property name="text">
+        <string>Experience</string>
+       </property>
+      </widget>
+     </item>
+     <item row="2" column="0">
+      <widget class="QLabel" name="label_6">
+       <property name="text">
+        <string>Role</string>
+       </property>
+      </widget>
+     </item>
+     <item row="0" column="1">
+      <widget class="QLabel" name="CurrentUserNameLabel">
+       <property name="text">
+        <string>*no current user saved*</string>
+       </property>
+      </widget>
+     </item>
+     <item row="1" column="1">
+      <widget class="QLabel" name="CurrentExperienceLevelLabel">
+       <property name="text">
+        <string>*not set*</string>
+       </property>
+      </widget>
+     </item>
+     <item row="2" column="1">
+      <widget class="QLabel" name="CurrentRoleLabel">
+       <property name="text">
+        <string>*not set*</string>
+       </property>
+      </widget>
+     </item>
+    </layout>
+   </item>
+   <item>
+    <widget class="ctkCollapsibleButton" name="UserInfoCollapsibleButton">
+     <property name="text">
+      <string>User Information</string>
+     </property>
+     <layout class="QFormLayout" name="formLayout">
+      <item row="0" column="0">
+       <widget class="QLabel" name="label">
+        <property name="text">
+         <string>Name</string>
+        </property>
+       </widget>
+      </item>
+      <item row="0" column="1">
+       <widget class="QLineEdit" name="UserNameLineEdit"/>
+      </item>
+      <item row="1" column="0">
+       <widget class="QLabel" name="label_2">
+        <property name="text">
+         <string>Experience</string>
+        </property>
+       </widget>
+      </item>
+      <item row="2" column="0">
+       <widget class="QLabel" name="label_3">
+        <property name="text">
+         <string>Role</string>
+        </property>
+       </widget>
+      </item>
+      <item row="1" column="1">
+       <widget class="ctkComboBox" name="ExperienceLevelComboBox">
+        <property name="currentText">
+         <string>Newbie</string>
+        </property>
+        <item>
+         <property name="text">
+          <string>Newbie</string>
+         </property>
+        </item>
+        <item>
+         <property name="text">
+          <string>Intermediate</string>
+         </property>
+        </item>
+        <item>
+         <property name="text">
+          <string>Expert</string>
+         </property>
+        </item>
+       </widget>
+      </item>
+      <item row="2" column="1">
+       <widget class="ctkComboBox" name="RoleComboBox">
+        <item>
+         <property name="text">
+          <string>Nursing Student</string>
+         </property>
+        </item>
+        <item>
+         <property name="text">
+          <string>Medical Student</string>
+         </property>
+        </item>
+        <item>
+         <property name="text">
+          <string>Resident</string>
+         </property>
+        </item>
+        <item>
+         <property name="text">
+          <string>Fellow</string>
+         </property>
+        </item>
+        <item>
+         <property name="text">
+          <string>Attending Physician</string>
+         </property>
+        </item>
+       </widget>
+      </item>
+      <item row="3" column="1">
+       <widget class="QPushButton" name="SaveUserInfoButton">
+        <property name="text">
+         <string>Save User Information</string>
+        </property>
+       </widget>
+      </item>
+     </layout>
+    </widget>
+   </item>
+   <item>
+    <widget class="ctkCollapsibleButton" name="CollapsibleButton">
+     <property name="text">
+      <string>Run Tracking</string>
+     </property>
+     <layout class="QVBoxLayout" name="verticalLayout_2">
+      <item>
+       <widget class="QPushButton" name="StartStopRecordingButton">
+        <property name="text">
+         <string>Start Recording</string>
+        </property>
+       </widget>
+      </item>
+     </layout>
+    </widget>
+   </item>
+   <item>
+    <widget class="ctkCollapsibleButton" name="CollapsibleButton_2">
+     <property name="text">
+      <string>Review Tracked Runs</string>
+     </property>
+     <layout class="QFormLayout" name="formLayout_3">
+      <item row="0" column="0">
+       <widget class="QLabel" name="label_10">
+        <property name="text">
+         <string>Select Run To Review</string>
+        </property>
+       </widget>
+      </item>
+      <item row="1" column="0">
+       <widget class="QLabel" name="label_11">
+        <property name="text">
+         <string>Select Expert Run To Compare</string>
+        </property>
+       </widget>
+      </item>
+      <item row="0" column="1">
+       <widget class="ctkComboBox" name="ComboBox_3">
+        <item>
+         <property name="text">
+          <string>* no recorded runs yet for this session * </string>
+         </property>
+        </item>
+       </widget>
+      </item>
+      <item row="1" column="1">
+       <widget class="ctkComboBox" name="ComboBox_4">
+        <item>
+         <property name="text">
+          <string>ExpertRun1_LeftNostril</string>
+         </property>
+        </item>
+        <item>
+         <property name="text">
+          <string>ExpertRun2_RightNostril</string>
+         </property>
+        </item>
+       </widget>
+      </item>
+      <item row="2" column="1">
+       <widget class="QPushButton" name="pushButton_3">
+        <property name="text">
+         <string>Display Selected Runs</string>
+        </property>
+       </widget>
+      </item>
+     </layout>
+    </widget>
+   </item>
+  </layout>
+ </widget>
+ <customwidgets>
+  <customwidget>
+   <class>ctkCollapsibleButton</class>
+   <extends>QWidget</extends>
+   <header>ctkCollapsibleButton.h</header>
+   <container>1</container>
+  </customwidget>
+  <customwidget>
+   <class>ctkComboBox</class>
+   <extends>QComboBox</extends>
+   <header>ctkComboBox.h</header>
+  </customwidget>
+  <customwidget>
+   <class>qMRMLWidget</class>
+   <extends>QWidget</extends>
+   <header>qMRMLWidget.h</header>
+   <container>1</container>
+  </customwidget>
+ </customwidgets>
+ <resources/>
+ <connections/>
+</ui>

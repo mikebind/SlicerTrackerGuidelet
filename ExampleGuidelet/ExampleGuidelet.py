@@ -104,6 +104,10 @@ class ExampleGuideletLogic(GuideletLogic):
   def __init__(self, parent = None):
     GuideletLogic.__init__(self, parent)
 
+  def createSessionFile(self, headerText, parameterNode):
+     pass
+  
+
   # Next goal - write test to process multiple files and crop them to just inside paths
   def processTrackerFileToRuns(self, mhaFile, segmentationNode, entryRegionName='entryZone', deeperRegionName='deeperZone'):
       """Inputs are name/path to saved tracker recording file, segmentation node with segments 
@@ -918,9 +922,32 @@ class ExampleGuideletTest(GuideletTest):
 class ExampleGuideletGuidelet(Guidelet):
 
   def __init__(self, parent, logic, configurationName='Default'):
-    self.calibrationCollapsibleButton = None
+    #self.calibrationCollapsibleButton = None
+    try:
+      slicer.modules.plusremote
+    except:
+      raise Exception('Error: Could not find Plus Remote module. Please install the SlicerOpenIGTLink extension')
+    
+    self.plusRemoteLogic = slicer.modules.plusremote.logic()
+    self.plusRemoteNode = None
+    # Set up icon paths
+    fileDir = os.path.dirname(__file__)
+    iconPathRecord = os.path.join(fileDir, 'Resources', 'Icons', 'icon_Record.png')
+    iconPathStop = os.path.join(fileDir, 'Resources', 'Icons', 'icon_Stop.png')
 
+    if os.path.isfile(iconPathRecord):
+      self.recordIcon = qt.QIcon(iconPathRecord)
+    else:
+       logging.warning(f'Icon not found at {iconPathRecord}!')
+    if os.path.isfile(iconPathStop):
+      self.stopIcon = qt.QIcon(iconPathStop)
+
+    # Init guidelet 
     Guidelet.__init__(self, parent, logic, configurationName)
+    self._updatingGuideletGUIFromParameterNode = False
+    self.updateParameterNodeFromGuideletGUI() # force initial update from loaded GUI values (could also set up parameter node 
+    # ahead of time, but if we don't do either we end up trying to update the GUI from empty parameter node fields)
+
     logging.debug('ExampleGuideletGuidelet.__init__')
 
     self.logic.addValuesToDefaultConfiguration()
@@ -930,16 +957,42 @@ class ExampleGuideletGuidelet(Guidelet):
     # Set up main frame.
 
     self.sliceletDockWidget.setObjectName('ExampleGuideletPanel')
-    self.sliceletDockWidget.setWindowTitle('Example guidelet')
-    self.mainWindow.setWindowTitle('ExampleGuidelet')
+    self.sliceletDockWidget.setWindowTitle('Airway Tracker')
+    self.mainWindow.setWindowTitle('Airway Tracker')
     self.mainWindow.windowIcon = qt.QIcon(moduleDirectoryPath + '/Resources/Icons/ExampleGuidelet.png')
 
     self.setupScene()
 
-    self.navigationView = self.VIEW_ULTRASOUND_3D
+    self.navigationView = self.VIEW_3D
 
     # Setting button open on startup.
-    self.calibrationCollapsibleButton.setProperty('collapsed', False)
+    #self.calibrationCollapsibleButton.setProperty('collapsed', False)
+
+  def updateParameterNodeFromGuideletGUI(self, caller=None, event=None):
+     """ Update parameter node values from current GUI information """
+     self.parameterNode.SetParameter('userNameLineEditString', self.userNameLineEdit.text)
+     self.parameterNode.SetParameter('experienceLevelComboBoxCurrentIndex', str(self.experienceLevelComboBox.currentIndex))
+     self.parameterNode.SetParameter('experienceLevelComboBoxCurrentString', self.experienceLevelComboBox.currentText)
+     self.parameterNode.SetParameter('roleComboBoxCurrentIndex', str(self.roleComboBox.currentIndex))
+     self.parameterNode.SetParameter('roleComboBoxCurrentText', self.roleComboBox.currentText)
+     
+  
+  def updateGuideletGUIFromParameterNode(self, caller=None, event=None):
+     """ Update Guidelet GUI elements from parameter values"""
+     if self.parameterNode is None or self._updatingGuideletGUIFromParameterNode:
+        return
+     self._updatingGuideletGUIFromParameterNode = True # prevent infinite update loops
+     # User name
+     self.userNameLineEdit.text = self.parameterNode.GetParameter('userNameLineEditString')
+     # Experience level
+     self.experienceLevelComboBox.setCurrentIndex(int(self.parameterNode.GetParameter('experienceLevelComboBoxCurrentIndex')))
+     # current text is updated automatically with the index update ^^
+     # Role
+     self.roleComboBox.setCurrentIndex(int(self.parameterNode.GetParameter('roleComboBoxCurrentIndex')))
+     # List of runs
+     # List of expert runs
+     # NOTE: Parameter node settings related to the Advanced panel are handled in Guidelet.py
+     self._updatingGuideletGUIFromParameterNode = False
 
 
   def createFeaturePanels(self):
@@ -962,14 +1015,93 @@ class ExampleGuideletGuidelet(Guidelet):
   # Clean up when guidelet is closed
   def preCleanup(self):#common
     Guidelet.preCleanup(self)
+    self.disconnect()
+
     logging.debug('preCleanup')
 
+  def createPlusConnector(self):
+    connectorNode = slicer.mrmlScene.GetFirstNodeByName('PlusConnector')
+    if not connectorNode:
+      connectorNode = slicer.vtkMRMLIGTLConnectorNode()
+      slicer.mrmlScene.AddNode(connectorNode)
+      connectorNode.SetName('PlusConnector')
+      hostNamePort = self.parameterNode.GetParameter('PlusServerHostNamePort') # example: "localhost:18944"
+      [hostName, port] = hostNamePort.split(':')
+      connectorNode.SetTypeClient(hostName, int(port))
+      logging.debug("PlusConnector created")
+    return connectorNode
+  
+  def onConnectorNodeConnected_Ex(self):
+    #self.freezeUltrasoundButton.setText('Freeze')
+    self.startStopRecordingButton.setEnabled(True)
+
+  def onConnectorNodeDisconnected_Ex(self):
+    #self.freezeUltrasoundButton.setText('Un-freeze')
+    if self.parameterNode.GetParameter('RecordingEnabledWhenConnectorNodeDisconnected') == 'False':
+      self.startStopRecordingButton.setEnabled(False)
 
   def setupConnections(self):
     logging.debug('ScoliUs.setupConnections()')
     Guidelet.setupConnections(self)
-    self.calibrationCollapsibleButton.connect('toggled(bool)', self.onPatientSetupPanelToggled)
-    self.exampleButton.connect('clicked(bool)', self.onExampleButtonClicked)
+    self.startStopRecordingButton.connect('clicked(bool)', self.updateParameterNodeFromGuideletGUI)
+    self.userNameLineEdit.connect('editingFinished()', self.updateParameterNodeFromGuideletGUI)
+    self.roleComboBox.connect('currentIndexChanged(int)', self.updateParameterNodeFromGuideletGUI)
+    self.experienceLevelComboBox.connect('currentIndexChanged(int)', self.updateParameterNodeFromGuideletGUI)
+    self.saveUserInfoButton.connect('clicked(bool)', self.saveUserInfoButtonClicked)
+
+    #self.calibrationCollapsibleButton.connect('toggled(bool)', self.onPatientSetupPanelToggled)
+    #self.exampleButton.connect('clicked(bool)', self.onExampleButtonClicked)
+    # TODO: Ensure disconnect() has all matching disconnections
+
+  def saveUserInfoButtonClicked(self, bool):
+    """Update the current user text section and save a session text file"""
+    # User
+    userText = self.parameterNode.GetParameter('userNameLineEditString')
+    if not userText:
+      userText = '*no current user saved*'  
+    self.parameterNode.SetParameter('CurrentUserText', userText)
+    self.currentUserNameLabel.text = userText
+    # Experience level
+    experienceText = self.parameterNode.GetParameter('experienceLevelComboBoxCurrentString')
+    if not experienceText:
+      experienceText = '*not set*'
+    self.parameterNode.SetParameter('CurrentUserExperienceLevelText', experienceText)
+    self.currentExperienceLevelLabel.text = experienceText
+    # Role
+    roleText = self.parameterNode.GetParameter('roleComboBoxCurrentText')
+    if not roleText:
+       roleText = '*not set*'
+    self.currentRoleLabel.text = roleText
+    # Create Session File to hold results
+    self.currentSessionFile = self.logic.createSessionFile(headerList=[userText, experienceText, roleText])
+
+  def onStartStopRecordingClicked(self):
+    self.captureDeviceName = self.parameterNode.GetParameter('PLUSCaptureDeviceName')
+    if self.startStopRecordingButton.isChecked():
+      self.startStopRecordingButton.setText("  Stop Recording")
+      self.startStopRecordingButton.setIcon(self.stopIcon)
+      self.startStopRecordingButton.setToolTip("Recording is being started...")
+      if self.captureDeviceName  != '':
+        # Important to save as .mhd because that does not require lengthy finalization (merging into a single file)
+        recordPrefix = self.parameterNode.GetParameter('RecordingFilenamePrefix')
+        recordExt = self.parameterNode.GetParameter('RecordingFilenameExtension')
+        self.recordingFileName =  recordPrefix + time.strftime("%Y%m%d-%H%M%S") + recordExt
+
+        logging.info("Starting recording to: {0}".format(self.recordingFileName))
+
+        self.plusRemoteNode.SetCurrentCaptureID(self.captureDeviceName)
+        self.plusRemoteNode.SetRecordingFilename(self.recordingFileName)
+        self.plusRemoteLogic.StartRecording(self.plusRemoteNode)
+
+    else:
+      self.startStopRecordingButton.setText("  Start Recording")
+      self.startStopRecordingButton.setIcon(self.recordIcon)
+      self.startStopRecordingButton.setToolTip( "Recording is being stopped..." )
+      if self.captureDeviceName  != '':
+        logging.info("Stopping recording")
+        self.plusRemoteNode.SetCurrentCaptureID(self.captureDeviceName)
+        self.plusRemoteLogic.StopRecording(self.plusRemoteNode)
+
 
 
   def setupScene(self): #applet specific
@@ -998,9 +1130,33 @@ class ExampleGuideletGuidelet(Guidelet):
       self.referenceToRas.SetMatrixTransformToParent(m)
       slicer.mrmlScene.AddNode(self.referenceToRas)
 
-    Guidelet.setupScene(self) # <--connection with Plus server is made here
+    # Guidelet.setupScene(self) # <--connection with Plus server is made here
+    # Guidelet.setupScene just calls AirwayTrackerClass.setupScene, which only sets up the plusRemoteNode
+    # (and the reslice driver for the ultrasound version, but we're not using that currently)
+    # Moving that code here
+    logging.debug('ExampleGuideletGuidelet.setupScene: Getting/Creating PlusRemoteNode and observing')
+    self.plusRemoteNode = slicer.mrmlScene.GetFirstNodeByClass('vtkMRMLPlusRemoteNode')
+    if self.plusRemoteNode is None:
+      self.plusRemoteNode = slicer.vtkMRMLPlusRemoteNode()
+      self.plusRemoteNode.SetName("PlusRemoteNode")
+      slicer.mrmlScene.AddNode(self.plusRemoteNode)
+    self.plusRemoteNode.AddObserver(slicer.vtkMRMLPlusRemoteNode.RecordingStartedEvent, self.recordingCommandCompleted)
+    self.plusRemoteNode.AddObserver(slicer.vtkMRMLPlusRemoteNode.RecordingCompletedEvent, self.recordingCommandCompleted)
+    self.plusRemoteNode.SetAndObserveOpenIGTLinkConnectorNode(self.connectorNode) 
+
+
     # Not sure why 'EmTrackerToHeadSenso' didn't exist yet, trying processing events here
     slicer.app.processEvents() 
+    # Use PegNeckHead?
+    usingPegNeckHead = True
+    slicer.app.processEvents()
+    # Hide slice view annotations (patient name, scale, color bar, etc.) as they
+    # decrease reslicing performance by 20%-100%
+    logging.debug('Hide slice view annotations')
+    import DataProbe
+    dataProbeUtil=DataProbe.DataProbeLib.DataProbeUtil()
+    dataProbeParameterNode=dataProbeUtil.getParameterNode()
+    dataProbeParameterNode.SetParameter('showSliceViewAnnotations', '0')
 
     # Transforms
 
@@ -1027,9 +1183,15 @@ class ExampleGuideletGuidelet(Guidelet):
     ##     self.needleTipToNeedle.SetMatrixTransformToParent(m)
     ##   slicer.mrmlScene.AddNode(self.needleTipToNeedle)
 
-    # Use PegNeckHead?
-    usingPegNeckHead = True
-    slicer.app.processEvents()
+
+    # Check if expected transforms are available
+    try:
+       self.EmTrackerToHeadSensor = slicer.util.getNode('EmTrackerToHeadSenso')
+    except slicer.util.MRMLNodeNotFoundException:
+       # Conclude we are in testing mode for now
+       slicer.util.errorDisplay("Expected transform not found, running it test/debug mode!")
+       return # return early since the rest of the method will fail
+
     self.EmTrackerToHeadSensor = slicer.util.getNode('EmTrackerToHeadSenso')
     self.StylusSensorToEmTracker = slicer.util.getNode('StylusSensorToEmTrac')
     self.StylusTipToStylusSensor = slicer.util.getNode('StylusTipToStylusSen')
@@ -1076,15 +1238,15 @@ class ExampleGuideletGuidelet(Guidelet):
     ## self.needleToReference.SetAndObserveTransformNodeID(self.referenceToRas.GetID())
     ## self.needleTipToNeedle.SetAndObserveTransformNodeID(self.needleToReference.GetID())
     ## self.needleModel.SetAndObserveTransformNodeID(self.needleTipToNeedle.GetID())
+    return
 
-
-    # Hide slice view annotations (patient name, scale, color bar, etc.) as they
-    # decrease reslicing performance by 20%-100%
-    logging.debug('Hide slice view annotations')
-    import DataProbe
-    dataProbeUtil=DataProbe.DataProbeLib.DataProbeUtil()
-    dataProbeParameterNode=dataProbeUtil.getParameterNode()
-    dataProbeParameterNode.SetParameter('showSliceViewAnnotations', '0')
+  def recordingCommandCompleted(self, command, q):
+    """ lifted from AirwayTrackerClass.py """
+    statusText = "Recording "
+    statusText = statusText + self.plusRemoteNode.GetRecordingStatusAsString(self.plusRemoteNode.GetRecordingStatus()) + " "
+    statusText = statusText + self.plusRemoteNode.GetRecordingMessage() + " "
+    logging.info(statusText)
+    self.startStopRecordingButton.setToolTip(statusText)
 
   def createTransformNode(self, translationMm=[0,0,0],transformName='CreatedTransform'):
     """ Create a simple translation-only linear transform node from scratch """
@@ -1098,19 +1260,43 @@ class ExampleGuideletGuidelet(Guidelet):
   def disconnect(self):#TODO see connect
     logging.debug('ScoliUs.disconnect()')
     Guidelet.disconnect(self)
+    # Disconnect buttons (moved from AirwayTrackerClass.preCleanup -> disconnect)
+    self.startStopRecordingButton.disconnect('clicked(bool)', self.onStartStopRecordingClicked)
 
     # Remove observer to old parameter node
     if self.patientSLandmarks_Reference and self.patientSLandmarks_ReferenceObserver:
       self.patientSLandmarks_Reference.RemoveObserver(self.patientSLandmarks_ReferenceObserver)
       self.patientSLandmarks_ReferenceObserver = None
 
-    self.calibrationCollapsibleButton.disconnect('toggled(bool)', self.onPatientSetupPanelToggled)
-    self.exampleButton.disconnect('clicked(bool)', self.onExampleButtonClicked)
+    #self.calibrationCollapsibleButton.disconnect('toggled(bool)', self.onPatientSetupPanelToggled)
+    #self.exampleButton.disconnect('clicked(bool)', self.onExampleButtonClicked)
 
 
   def patientSetupPanel(self):
     logging.debug('patientSetupPanel')
 
+    # Load from UI file
+    moduleDir = os.path.dirname(__file__)
+    uiFilePath = os.path.join(moduleDir, 'Resources', 'UI', 'TrackerUIMike.ui')
+    loadedUIWidget = slicer.util.loadUI(uiFilePath)
+    loadedUI = slicer.util.childWidgetVariables(loadedUIWidget)
+    self.sliceletPanelLayout.addWidget(loadedUIWidget)
+    
+    self.startStopRecordingButton = loadedUI.StartStopRecordingButton
+    self.startStopRecordingButton.setCheckable(True)
+    self.startStopRecordingButton.setIcon(self.recordIcon)
+    self.startStopRecordingButton.setToolTip("If clicked, start recording")
+
+    self.saveUserInfoButton = loadedUI.SaveUserInfoButton
+    self.experienceLevelComboBox = loadedUI.ExperienceLevelComboBox
+    self.roleComboBox = loadedUI.RoleComboBox
+    self.userNameLineEdit = loadedUI.UserNameLineEdit
+    self.currentUserNameLabel = loadedUI.CurrentUserNameLabel
+    self.currentExperienceLevelLabel = loadedUI.CurrentExperienceLevelLabel
+    self.currentRoleLabel = loadedUI.CurrentRoleLabel
+
+    ##
+    """
     self.calibrationCollapsibleButton.setProperty('collapsedHeight', 20)
     self.calibrationCollapsibleButton.text = 'Calibration'
     self.sliceletPanelLayout.addWidget(self.calibrationCollapsibleButton)
@@ -1122,6 +1308,7 @@ class ExampleGuideletGuidelet(Guidelet):
     self.exampleButton = qt.QPushButton("Example button")
     self.exampleButton.setCheckable(False)
     self.calibrationButtonLayout.addRow(self.exampleButton)
+    """
 
 
   def onExampleButtonClicked(self, toggled):
@@ -1134,7 +1321,7 @@ class ExampleGuideletGuidelet(Guidelet):
 
     logging.debug('onPatientSetupPanelToggled: {0}'.format(toggled))
 
-    self.selectView(self.VIEW_ULTRASOUND_3D)
+    #self.selectView(self.VIEW_ULTRASOUND_3D)
 
 	
   def onUltrasoundPanelToggled(self, toggled):
