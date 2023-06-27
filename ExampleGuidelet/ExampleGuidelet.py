@@ -5,7 +5,7 @@ from SlicerGuideletBase import GuideletLoadable, GuideletLogic, GuideletTest, Gu
 from SlicerGuideletBase import Guidelet
 import logging
 import time
-from .Lib.HelperClasses import Session, Recording, ScopeRun
+from Lib.HelperClasses import Session, Recording, ScopeRun
 
 
 class ExampleGuidelet(GuideletLoadable):
