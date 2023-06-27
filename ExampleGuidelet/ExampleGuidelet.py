@@ -5,6 +5,7 @@ from SlicerGuideletBase import GuideletLoadable, GuideletLogic, GuideletTest, Gu
 from SlicerGuideletBase import Guidelet
 import logging
 import time
+from .HelperClasses import Session, Recording, ScopeRun
 
 
 class ExampleGuidelet(GuideletLoadable):
@@ -924,7 +925,7 @@ class ExampleGuideletLogic(GuideletLogic):
   def addValuesToDefaultConfiguration(self):
     GuideletLogic.addValuesToDefaultConfiguration(self)
     moduleDir = os.path.dirname(slicer.modules.exampleguidelet.path)
-    defaultUserSessionsSavePath = os.path.join(moduleDir, 'UserSessionResults')
+    defaultUserSessionsSavePath = os.path.join(moduleDir, 'UserSessionResults') # TODO: Create folder if it doesn't exist
     defaultSceneSavePath = os.path.join(moduleDir, 'SavedScenes')
     moduleDirectoryPath = slicer.modules.exampleguidelet.path.replace('ExampleGuidelet.py','')
     settingList = {
@@ -933,7 +934,6 @@ class ExampleGuideletLogic(GuideletLogic):
                    'TestMode' : 'False',
                    'RecordingFilenamePrefix' : 'AirwayTrackerRec-',
                    'UserSessionResultsDirectory': defaultUserSessionsSavePath, # folder to put session files in
-                   'SessionFilePrefix' : 'Session-',
                    'SavedScenesDirectory': defaultSceneSavePath, #overwrites the default setting param of base
                    }
     self.updateSettings(settingList, 'Default')
@@ -1074,15 +1074,28 @@ class ExampleGuideletGuidelet(Guidelet):
   def setupConnections(self):
     logging.debug('ScoliUs.setupConnections()')
     Guidelet.setupConnections(self)
-    self.startStopRecordingButton.connect('clicked(bool)', self.updateParameterNodeFromGuideletGUI)
+    self.startStopRecordingButton.connect('clicked(bool)', self.onStartStopRecordingClicked)
     self.userNameLineEdit.connect('editingFinished()', self.updateParameterNodeFromGuideletGUI)
     self.roleComboBox.connect('currentIndexChanged(int)', self.updateParameterNodeFromGuideletGUI)
     self.experienceLevelComboBox.connect('currentIndexChanged(int)', self.updateParameterNodeFromGuideletGUI)
     self.saveUserInfoButton.connect('clicked(bool)', self.saveUserInfoButtonClicked)
+    self.displaySelectedRunButton.connect('clicked(bool)', self.onDisplaySelectedRunClicked)
 
     #self.calibrationCollapsibleButton.connect('toggled(bool)', self.onPatientSetupPanelToggled)
     #self.exampleButton.connect('clicked(bool)', self.onExampleButtonClicked)
     # TODO: Ensure disconnect() has all matching disconnections
+
+  def onDisplaySelectedRunClicked(self):
+    """Display the currently selected run in the 3D view """
+    runFileName = self.getRunToReviewFileName()
+    recordingsDataDirectory = self.parameterNode.GetParameter('PlusAppDataDirectory')
+    self.logic.displayRunFromFile()
+
+  def getRunToReviewFileName(self):
+    """return the file name of the recording file for the currently selected run in the
+    runToReviewComboBox. Will need to be adjusted if a different representation is used
+    in the comboBox than the raw file name"""
+    return self.runToReviewComboBox.currentText
 
   def saveUserInfoButtonClicked(self, bool):
     """Update the current user text section and save a session text file"""
@@ -1106,14 +1119,19 @@ class ExampleGuideletGuidelet(Guidelet):
     self.currentRoleLabel.text = roleText
     # Create Session File to hold results
     sessionDirectory = self.parameterNode.GetParameter('UserSessionResultsDirectory')
-    sessionFilePrefix = self.parameterNode.GetParameter('SessionFilePrefix')
+    
     userName = self.parameterNode.GetParameter('CurrentUserText')
-    self.currentSessionFilePath = self.logic.constructCurrentSessionFilePath(sessionDirectory, sessionFilePrefix, userName)
-    self.logic.createSessionFile(headerList=[userText, experienceText, roleText], currentSessionFilePath=self.currentSessionFilePath)
-    self.parameterNode.SetParameter('CurrentSessionFilePath', self.currentSessionFilePath)
+    userDict = {'userName': userName,
+                'experienceLevel': experienceText,
+                'role': roleText}
+    self.currentSession = Session(userDict)
+    self.currentSession.saveToFile(sessionDirectory)
+    self.parameterNode.SetParameter('CurrentSessionFilePath', self.currentSession.savedFilePathName)
     # Clear out RunsData for previous session
-    self.logic.updateRunsDataListFromSessionFile(self.currentSessionFilePath)
-    self.parameterNode.SetParameter('RunsData')
+    listOfRuns = self.logic.getListOfRunsFromSessionFile(self.currentSession.savedFilePathName)
+    self.updateRunsToReview(listOfRuns)
+    delim = '|' # list delimiter for parameter node lists #TODO: store in to parameter node 
+    self.parameterNode.SetParameter('RunsData', delim.join(listOfRuns))
 
   def onStartStopRecordingClicked(self):
     self.captureDeviceName = self.parameterNode.GetParameter('PLUSCaptureDeviceName')
@@ -1155,10 +1173,12 @@ class ExampleGuideletGuidelet(Guidelet):
   def updateRunsToReview(self, listOfRuns):
     """From a list of runs (filenames of recordings), update the dropdown"""
     # Remove all items
-    self.RunToReviewComboBox.clear()
+    self.runToReviewComboBox.clear()
     if listOfRuns:
       for runFileName in listOfRuns:
         self.runToReviewComboBox.addItem(runFileName)
+    else: 
+       self.runToReviewComboBox.addItem('*no runs recorded this session*')
     
 
   def setupScene(self): #applet specific
