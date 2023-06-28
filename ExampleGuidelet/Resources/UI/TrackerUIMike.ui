@@ -177,14 +177,14 @@
      </property>
      <layout class="QFormLayout" name="formLayout_3">
       <item row="0" column="0">
-       <widget class="QLabel" name="label_10">
+       <widget class="QLabel" name="RunToReviewLabel">
         <property name="text">
          <string>Select Run To Review</string>
         </property>
        </widget>
       </item>
       <item row="1" column="0">
-       <widget class="QLabel" name="label_11">
+       <widget class="QLabel" name="ExpertRunToCompareLabel">
         <property name="text">
          <string>Select Expert Run To Compare</string>
         </property>

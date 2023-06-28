@@ -5,6 +5,7 @@ from SlicerGuideletBase import GuideletLoadable, GuideletLogic, GuideletTest, Gu
 from SlicerGuideletBase import Guidelet
 import logging
 import time
+import numpy as np
 from Lib.HelperClasses import Session, Recording, ScopeRun
 
 
@@ -97,7 +98,9 @@ HEAD_SENSOR_TRANSFORM_POSITION_IN_HIERARCHY = 1
 SCOPE_SENSOR_TRANSFORM_POSITION_IN_HIERARCHY = 2
 DEFAULT_LEAF_TRANSFORM_NODE_NAME = 'Extra'
 moduleDir = os.path.dirname(__file__)
-DEFAULT_AIRWAYZONE_SEGMENTATION = os.path.join(moduleDir, "Resources","airwayZoneSegmentation.seg.nrrd")
+PEGNECK_AIRWAYZONE_SEGMENTATION = os.path.join(moduleDir, "Resources","Segmentations", "airwayZoneSegmentation.seg.nrrd")
+RIGIDNECK_AIRWAYZONE_SEGMENTATION = os.path.join(moduleDir, "Resources", "Segmentations", "RigidNeckAirwaySegmentation.seg.nrrd")
+RIGIDNECK_STL = os.path.join(moduleDir, "Resources", "Segmentations", "SolidOuter_Cropped.stl")
 
 class ExampleGuideletLogic(GuideletLogic):
   """Uses GuideletLogic base class, available at:
@@ -106,6 +109,18 @@ class ExampleGuideletLogic(GuideletLogic):
 
   def __init__(self, parent = None):
     GuideletLogic.__init__(self, parent)
+
+  def displayScopeRun(self, scopeRunToDisplay):
+    logging.debug('ExampleGuideletLogic.displayScopeRun()')
+    if scopeRunToDisplay.coneModel is None:
+       scopeRunToDisplay.createModelNodes()
+    scopeRunToDisplay.showModelNodes()
+    
+
+  def hideScopeRun(self, scopeRunToDisplay):
+     logging.debug('ExampleGuideletLogic.hideScopeRun()')
+     scopeRunToDisplay.hideModelNodes()
+     
 
   def createSessionFile(self, headerList, currentSessionFilePath):
     raise(Exception('ExampleGuidelet.createSessionFile() accessed, but functionality moved to Session objects!'))
@@ -119,6 +134,7 @@ class ExampleGuideletLogic(GuideletLogic):
     return 
   
   def appendToSessionFile(self, textToAppend, sessionFilePath):
+    raise(Exception("no longer used"))
     """Append supplied text to the given file, adding a newline at the end
     """
     with open(sessionFilePath, 'a') as f:
@@ -126,6 +142,7 @@ class ExampleGuideletLogic(GuideletLogic):
     return
 
   def getListOfRunsFromSessionFile(self, sessionFilePath, delimiterLine='---\n'):
+    raise(Exception("no longer used"))
     """Process session file to a list of recordings file names"""
     with open(sessionFilePath,'r') as f:
       lines = f.readlines() # newlines are not removed!
@@ -136,6 +153,7 @@ class ExampleGuideletLogic(GuideletLogic):
     return listOfRuns
 
   def constructCurrentSessionFilePath(self, sessionDirectory, sessionFilePrefix, userName):
+    raise(Exception("no longer used"))
     timeStamp = time.strftime(r"%Y-%m-%d-%H%M%S")
     currentSessionFilePath = os.path.join(sessionDirectory, f"{sessionFilePrefix}{userName.replace(' ','_')}-{timeStamp}.txt")
     return currentSessionFilePath
@@ -175,223 +193,12 @@ class ExampleGuideletLogic(GuideletLogic):
           pathRunsModelNodes.append(pathRunModelNode)
       return pathRunsModelNodes, rawPathModelNode
 
-  def modelNodeFromPositionsAndOrientations(self, positions, orientations, scalars=None, sizeFactor=2.0):
-      """Create model node with polydata (for non-interactive version of markups)
-      Helpful links: 
-      https://www.dillonbhuff.com/?p=540
-      https://vtk.org/doc/release/5.0/html/a01880.html#:~:text=vtkPolyData%20is%20a%20data%20object,also%20are%20represented.
-      """
-      # TODO: Add velocities (size), deviations from expert (color)?
-      import numpy as np
-      pointsArray = positions # an nx3 numpy array
-      numPoints = pointsArray.shape[0]
-      #diffs = np.diff(pointsArray, axis=0)
-      # Expand scalars to array if needed 
-      if scalars is None:
-        scalars = np.ones(numPoints)
-      elif isinstance(scalars, (list, tuple, np.ndarray)) and len(scalars)==1:
-        scalars = scalars[0] * np.ones(numPoints)
-      else:
-        # Single value not in a list
-        scalars = scalars * np.ones(numPoints)
-
-      # Create VTK arrays needed for model node
-      points = vtk.vtkPoints() # actual pointData locations
-      vertices = vtk.vtkCellArray() # handles vertex locations (in our case this will just be all the points, but note that
-      # points could be a superset of vertices because points could include the endpoints of lines or corners of polygons 
-      # which don't themselves have to be in the list of vertices.  Vertices are what the vtkGlyph3D filter operates on
-      lines = vtk.vtkCellArray() # handles lines (and same type would handle polygons if those were being used)
-
-      
-
-      vectors = vtk.vtkFloatArray() # this will affect glyph orientation and is going to be set to the vector to the next point
-      vectors.SetNumberOfComponents(3)
-      vectors.SetName("Directions")
-
-      sizes = vtk.vtkFloatArray() # this will go in scalars 
-      sizes.SetName("Sizes")
-      #colors = vtk.vtkFloatArray()
-      #colors.SetName("Colors"
-
-      # Assemble arrays of values
-      for point, orientation, scalar in zip(positions,orientations,scalars):
-        pointID = points.InsertNextPoint(point)
-        # Vertices
-        cellID = vertices.InsertNextCell(1) # allocates a next cell with space for one point ID (lines would have 2, triangles 3, polygons N)
-        vertices.InsertCellPoint(pointID) # fills the first (and only) slot for this cell
-        # Vectors
-        vectorID = vectors.InsertNextTuple(orientation)
-        # Speed?? Could be calculated here and used to size the cones? TODO
-        sizes.InsertNextValue(scalar * sizeFactor)
-        if pointID != (numPoints-1):
-          # Add a line unless this is the very last point
-          lines.InsertNextCell(2)
-          # allocates a next cell with space for two pointIDs (the endpoints of the line)
-          lines.InsertCellPoint(pointID)
-          lines.InsertCellPoint(pointID+1)
-          
-          #size = e[i] * sizeFactor
-          #_ = sizes.InsertNextValue(size)
-          #colorIdx = cmapIndices[i]
-          #_ = colors.InsertNextValue(colorIdx)
-          
-      ## Create the vtkPolyData
-      pointsPolyData = vtk.vtkPolyData()
-      pointsPolyData.SetPoints(points)
-      pointsPolyData.SetVerts(vertices)
-      pointsPolyData.SetLines(lines)
-      pointsData = pointsPolyData.GetPointData()
-      _ = pointsData.SetScalars(sizes)  #scalars are literally used as size scale factors, I think
-      _ = pointsData.SetVectors(vectors)
-      #_ = pointsData.AddArray(colors)
-
-      sphere = vtk.vtkSphereSource()  # ConeSource()
-      cone = vtk.vtkConeSource()
-      cone.SetResolution(18)
-
-      linesPolyData = vtk.vtkPolyData()
-      linesPolyData.SetPoints(points)
-      linesPolyData.SetLines(lines)
-
-      tubeFilter = vtk.vtkTubeFilter()
-      tubeFilter.SetInputData(linesPolyData)
-      tubeFilter.SetRadius(0.5)
-      tubeFilter.SetNumberOfSides(15)
-
-      glyphFilter = vtk.vtkGlyph3D()
-      glyphFilter.SetSourceConnection(cone.GetOutputPort())
-      glyphFilter.SetInputData(pointsPolyData)
-
-      modelNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLModelNode", 'OriCones')
-      modelNode.CreateDefaultDisplayNodes()
-      modelDisplay = modelNode.GetDisplayNode()
-      # modelDisplay.SetAndObserveColorNodeID('vtkMRMLColorTableNodeFileViridis.txt')
-      #modelDisplay.SetAndObserveColorNodeID(
-      #    "vtkMRMLColorTableNodeFileColdToHotRainbow.txt"
-      #)
-      # Color table names can be found at https://apidocs.slicer.org/master/classvtkMRMLColorLogic.html
-      # I found that changing the color using the Model display node GUI crashes slicer, I don't know why
-      #modelDisplay.SetScalarVisibility(True)
-      #modelDisplay.SetActiveScalarName("Colors")
-
-      # Connect to glyph output
-      modelNode.SetPolyDataConnection(glyphFilter.GetOutputPort())
-
-      # Lines version
-      modelNode2 = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLModelNode', 'Tube')
-      modelNode2.CreateDefaultDisplayNodes()
-      modelNode2.SetPolyDataConnection(tubeFilter.GetOutputPort())
-      return modelNode, modelNode2
-
-  def modelNodeFromPositions(self, positions):
-      """Create model node with polydata (for non-interactive version of markups)
-      Helpful links: 
-      https://www.dillonbhuff.com/?p=540
-      https://vtk.org/doc/release/5.0/html/a01880.html#:~:text=vtkPolyData%20is%20a%20data%20object,also%20are%20represented.
-      """
-      import numpy as np
-      # Create VTK arrays needed for model node
-      points = vtk.vtkPoints() # actual pointData locations
-      vertices = vtk.vtkCellArray() # handles vertex locations (in our case this will just be all the points, but note that
-      # points could be a superset of vertices because points could include the endpoints of lines or corners of polygons 
-      # which don't themselves have to be in the list of vertices.  Vertices are what the vtkGlyph3D filter operates on
-      lines = vtk.vtkCellArray() # handles lines (and same type would handle polygons if those were being used)
-
-      pointsArray = positions # an nx3 numpy array
-      diffs = np.diff(pointsArray, axis=0)
-
-      vectors = vtk.vtkFloatArray() # this will affect glyph orientation and is going to be set to the vector to the next point
-      vectors.SetNumberOfComponents(3)
-      vectors.SetName("Directions")
-
-      #sizes = vtk.vtkFloatArray() # this will go in scalars 
-      #sizes.SetName("Sizes")
-      #colors = vtk.vtkFloatArray()
-      #colors.SetName("Colors")
-      vectors = vtk.vtkFloatArray() # this will affect glyph orientation and is going to be set to the vector to the next point
-      vectors.SetNumberOfComponents(3)
-      vectors.SetName("Directions")
-
-      # Assemble arrays of values
-      for i, vectorThisToNext in enumerate(diffs):
-          point = pointsArray[i]
-          pointID = points.InsertNextPoint(point)
-          # Vertices
-          cellID = vertices.InsertNextCell(1) # allocates a next cell with space for one point ID (lines would have 2, triangles 3, polygons N)
-          vertices.InsertCellPoint(pointID) # fills the first (and only) slot for this cell
-          #size = e[i] * sizeFactor
-          #_ = sizes.InsertNextValue(size)
-          #colorIdx = cmapIndices[i]
-          #_ = colors.InsertNextValue(colorIdx)
-          # Vectors
-          _ = vectors.InsertNextTuple(vectorThisToNext)
-          # Lines
-          lines.InsertNextCell(2) # allocates a next cell with space for two pointIDs (the endpoints of the line)
-          lines.InsertCellPoint(pointID)
-          lines.InsertCellPoint(pointID+1)
-      # The above loop leaves off the last contact (because len(diffs) is one less than number of points)
-      # Adding this next section to make sure that last point is included
-      point = pointsArray[i + 1]
-      pointID = points.InsertNextPoint(point)
-      vertices.InsertCellPoint(pointID)
-      #size = e[i + 1] * sizeFactor
-      #_ = sizes.InsertNextValue(size)
-      #colorIdx = cmapIndices[i + 1]
-      #_ = colors.InsertNextValue(colorIdx)
-      _ = vectors.InsertNextTuple(vectorThisToNext)  # just repeat last vector
-      # Lines is already complete (there are n-1 lines for n points)
-
-      ## Create the vtkPolyData
-      pointsPolyData = vtk.vtkPolyData()
-      pointsPolyData.SetPoints(points)
-      pointsPolyData.SetVerts(vertices)
-      pointsPolyData.SetLines(lines)
-      pointsData = pointsPolyData.GetPointData()
-      #_ = pointsData.SetScalars(sizes)
-      _ = pointsData.SetVectors(vectors)
-      #_ = pointsData.AddArray(colors)
-
-      sphere = vtk.vtkSphereSource()  # ConeSource()
-      cone = vtk.vtkConeSource()
-      cone.SetResolution(18)
-
-      linesPolyData = vtk.vtkPolyData()
-      linesPolyData.SetPoints(points)
-      linesPolyData.SetLines(lines)
-
-      tubeFilter = vtk.vtkTubeFilter()
-      tubeFilter.SetInputData(linesPolyData)
-      tubeFilter.SetRadius(1)
-      tubeFilter.SetNumberOfSides(15)
-
-      glyphFilter = vtk.vtkGlyph3D()
-      glyphFilter.SetSourceConnection(cone.GetOutputPort())
-      glyphFilter.SetInputData(pointsPolyData)
-
-      modelNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLModelNode", 'Cones')
-      modelNode.CreateDefaultDisplayNodes()
-      modelDisplay = modelNode.GetDisplayNode()
-      # modelDisplay.SetAndObserveColorNodeID('vtkMRMLColorTableNodeFileViridis.txt')
-      #modelDisplay.SetAndObserveColorNodeID(
-      #    "vtkMRMLColorTableNodeFileColdToHotRainbow.txt"
-      #)
-      # Color table names can be found at https://apidocs.slicer.org/master/classvtkMRMLColorLogic.html
-      # I found that changing the color using the Model display node GUI crashes slicer, I don't know why
-      #modelDisplay.SetScalarVisibility(True)
-      #modelDisplay.SetActiveScalarName("Colors")
-
-      # Connect to glyph output
-      modelNode.SetPolyDataConnection(glyphFilter.GetOutputPort())
-
-      # Lines version
-      modelNode2 = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLModelNode', 'Tube')
-      modelNode2.CreateDefaultDisplayNodes()
-      modelNode2.SetPolyDataConnection(tubeFilter.GetOutputPort())
-      return modelNode, modelNode2
+ 
 
 
   def trimPathToRange(self, markupsNode, startIdx, endIdx, outputMarkupsNode=None):
-      """
+      """ for trimming either or both ends off of a markupsNode.  Not currently used 
+      at all. 
       """
       import numpy as np
       if outputMarkupsNode is None:
@@ -539,99 +346,6 @@ class ExampleGuideletLogic(GuideletLogic):
       return curveNode
 
 
-  def positions_from_transform_hierarchy(self, transformsList):
-      """Compute series of locations given a list of hierarchical transform matrices. 
-      transformsList[i] must either be a single 4x4 array or a 4x4xN array, where N is 
-      the number of time step frames. transformsList[i] is the parent transform to 
-      transformsList[i+1]
-      """
-      import numpy as np
-      
-      numFramesPer = np.zeros((len(transformsList)),dtype=int)
-      for idx, tListItem in enumerate(transformsList):
-          numDims = tListItem.ndim
-          if numDims==3:
-              numFramesPer[idx] = tListItem.shape[2]
-          elif numDims==2:
-              numFramesPer[idx] = 1
-      # NumFramesPer elements should now all either equal 1 or the same number of frames
-      numFrames = np.max(numFramesPer)
-      assert np.all((numFramesPer==1) | (numFramesPer==numFrames) ), 'All transforms supplied must have either a single frame or the same number of frames!'        
-      # Calculate positions from the sequence of transforms
-      positions = np.zeros((numFrames, 3))
-      orientations = np.zeros((numFrames,3))
-      origin = np.zeros((4))
-      origin[3] = 1 # homogenous coordinate for a point
-      direction = np.zeros((4))
-      direction[2] = 1 # [0,0,1,0]
-      direction[3] = 0 # homogenous coord for a vector
-      concatTransforms = []
-      for frameNum in range(numFrames):
-          # Assemble the correct list of transforms for this frame
-          currentTransformList = []
-          for listIdx in range(len(transformsList)):
-              if numFramesPer[listIdx]==1:
-                  curTransform = transformsList[listIdx]
-              else:
-                  curTransform = transformsList[listIdx][:, :, frameNum]
-              currentTransformList.append(curTransform)
-          # Apply tranforms in order to origin position
-          concatTransform = np.linalg.multi_dot(currentTransformList)
-          concatTransforms.append(concatTransform)
-          currentPosition4 = concatTransform @ origin
-          currentOrientation4 = concatTransform @ direction
-          positions[frameNum,:] = currentPosition4[0:3]
-          orientations[frameNum,:] = currentOrientation4[0:3]
-      return positions, orientations
-
-
-  def import_tracker_recording(self, mha_file_path):
-      raise(Exception('Accessed ExampleGuidelet.import_tracker_recording(). Use Recording class version instead!'))
-      """Import the sequence of transforms stored in one of the guidelet mhd files.
-      """
-      import numpy as np
-      import re
-      logging.debug(f'Opening file: {mha_file_path} ...')
-      # Just parse far enough to get number of timesteps
-      numSeqFrames = 0
-      with open(mha_file_path) as f:
-          for line in f:
-              if line.startswith('DimSize'):
-                  numSeqFrames = int(line.rstrip().split()[-1])
-                  logging.debug(f'Found DimSize line: {numSeqFrames} time steps in file')
-                  break
-      if numSeqFrames==0:
-          raise(Exception('DimSize line not found in mha file processing, cannot determine number of processed time steps.'))
-      # Preallocate transform arrays
-      timeStamps = np.zeros((numSeqFrames))
-      headSensorTransforms = np.zeros((4,4,numSeqFrames))
-      scopeSensorTransforms = np.zeros((4,4,numSeqFrames))
-      # Sequence line info pattern
-      transformLinePatt = re.compile(r'Seq_Frame(?P<frameNumber>\d\d\d\d)_(?P<transformName>\w+) =(?P<matrix>( -?\d+(\.\d+)?([Ee][+-]?\d+)?){16})')
-      timeStampLinePatt = re.compile(r'Seq_Frame(?P<frameNumber>\d\d\d\d)_Timestamp = (?P<timeStamp>-?\d+(\.\d+)?)')
-      # Read the file line by line
-      with open(mha_file_path) as f:
-          keepgoing = True
-          for line in f:
-              if m := transformLinePatt.search(line):
-                  # Process the result
-                  groupDict = m.groupdict()
-                  #logging.debug(groupDict.__str__())
-                  frameNum = int(groupDict['frameNumber'])
-                  transformName = groupDict['transformName']
-                  transformMatrixList = groupDict['matrix'].lstrip().split() # row order 
-                  transformMatrix = np.array(transformMatrixList).reshape((4,4))
-                  # Store in arrays
-                  if re.search('Head', transformName):
-                      headSensorTransforms[:,:,frameNum] = np.linalg.inv(transformMatrix.astype('float64'))  # THESE NEED TO BE INVERTED!!!
-                  elif re.search('Stylus', transformName):
-                      scopeSensorTransforms[:,:,frameNum] = transformMatrix
-              if m := timeStampLinePatt.search(line):
-                  groupDict = m.groupdict()
-                  frameNum = int(groupDict['frameNumber'])
-                  timeStamp = float(groupDict['timeStamp'])
-                  timeStamps[frameNum] = timeStamp
-      return timeStamps, headSensorTransforms, scopeSensorTransforms
 
   def createVolumeFromROIandVoxelSize(
         self, ROINode, voxelSizeMm=[1.0, 1.0, 1.0], prioritizeVoxelSize=True
@@ -955,6 +669,7 @@ class ExampleGuideletGuidelet(Guidelet):
 
     # Setting button open on startup.
     #self.calibrationCollapsibleButton.setProperty('collapsed', False)
+    self.scopeRunsDisplayed = [] # initalize, no runs showing right now
 
   def updateParameterNodeFromGuideletGUI(self, caller=None, event=None):
      """ Update parameter node values from current GUI information """
@@ -1033,7 +748,7 @@ class ExampleGuideletGuidelet(Guidelet):
       self.startStopRecordingButton.setEnabled(False)
 
   def setupConnections(self):
-    logging.debug('ScoliUs.setupConnections()')
+    logging.debug('ExampleGuideletGuidelet.setupConnections()')
     Guidelet.setupConnections(self)
     self.startStopRecordingButton.connect('clicked(bool)', self.onStartStopRecordingClicked)
     self.userNameLineEdit.connect('editingFinished()', self.updateParameterNodeFromGuideletGUI)
@@ -1048,16 +763,17 @@ class ExampleGuideletGuidelet(Guidelet):
 
   def onDisplaySelectedRunClicked(self):
     """Display the currently selected run in the 3D view """
-    runFileName = self.getRunToReviewFileName()
-    recordingsDataDirectory = self.parameterNode.GetParameter('PlusAppDataDirectory')
-    self.logic.displayRunFromFile()
-
-  def getRunToReviewFileName(self):
-    """return the file name of the recording file for the currently selected run in the
-    runToReviewComboBox. Will need to be adjusted if a different representation is used
-    in the comboBox than the raw file name"""
-    return self.runToReviewComboBox.currentText
-
+    logging.debug('ExampleGuideletGuidelet.onDisplaySelectedRunClicked()')
+    key = self.runToReviewComboBox.currentText # get from parameter node instead?
+    scopeRunToDisplay = self.scopeRunDict[key]
+    # Hide other displayed scope runs
+    for S in self.scopeRunsDisplayed:
+      self.logic.hideScopeRun(S)
+    self.scopeRunsDisplayed = [] #TODO make display/hiding much more flexible!!
+    self.logic.displayScopeRun(scopeRunToDisplay)
+    # Track that this run is showing
+    self.scopeRunsDisplayed.append(scopeRunToDisplay)
+    
   def saveUserInfoButtonClicked(self, bool):
     """Update the current user text section and save a session text file"""
     # User
@@ -1089,10 +805,11 @@ class ExampleGuideletGuidelet(Guidelet):
     self.currentSession.saveToFile(sessionDirectory)
     self.parameterNode.SetParameter('CurrentSessionFilePath', self.currentSession.savedFilePathName)
     # Clear out RunsData for previous session
-    listOfRuns = self.logic.getListOfRunsFromSessionFile(self.currentSession.savedFilePathName)
-    self.updateRunsToReview(listOfRuns)
-    delim = '|' # list delimiter for parameter node lists #TODO: store in to parameter node 
-    self.parameterNode.SetParameter('RunsData', delim.join(listOfRuns))
+    self.updateRunsToReview()
+    for S in self.scopeRunsDisplayed:
+      self.logic.hideScopeRun(S)
+    #delim = '|' # list delimiter for parameter node lists #TODO: store in to parameter node 
+    #self.parameterNode.SetParameter('RunsData', delim.join(listOfRuns))
 
   def onStartStopRecordingClicked(self):
     self.captureDeviceName = self.parameterNode.GetParameter('PLUSCaptureDeviceName')
@@ -1112,8 +829,6 @@ class ExampleGuideletGuidelet(Guidelet):
         #self.recordingFileName =  recordPrefix + time.strftime("%Y%m%d-%H%M%S") + recordExt
 
         logging.info("Starting recording to: {0}".format(self.recordingFileName))
-
-        self.logic.appendToSessionFile(self.recordingFileName, self.currentSession.savedFilePathName)
 
         self.plusRemoteNode.SetCurrentCaptureID(self.captureDeviceName)
         self.plusRemoteNode.SetRecordingFilename(self.recordingFileName)
@@ -1136,7 +851,7 @@ class ExampleGuideletGuidelet(Guidelet):
         airwayZoneSegmentationNode = self.parameterNode.GetNodeReference('airwayZoneSegmentationNode')
         # NOTE: running into a bug here where the recording file is not yet available when processing
         # tries to access it. Need to delay if file is not yet available
-        max_attempts = 10
+        max_attempts = 100
         attempt_count = 1
         while not os.path.exists(recordingFileFullPath):
           time.sleep(0.1)
@@ -1149,22 +864,25 @@ class ExampleGuideletGuidelet(Guidelet):
           logging.debug(f'Success on attempt {attempt_count} to access {recordingFileFullPath}!')
         # Process the recording now that the file is available
         newRecording.processRecordingToScopeRuns(leafTransformNode, airwayZoneSegmentationNode, 'airwayZone')
+        logging.debug(f'Processed new recording to {len(newRecording.listOfScopeRuns)} runs')
+        # Update the dropdown list of runs to review
+        self.updateRunsToReview()
+        # Resave the session file (updated with recording and run data)
+        self.currentSession.saveToFile()
 
-
-        # Add the current run to the current dropdown list of RunsData. TODO!
-        listOfRecordingFileNames = self.currentSession.getListOfRecordingFileNames()
-
-        # Actually, this ^^ should be the a list of runs, not list of recording file names TODO TODO TODO
-        #listOfRuns = self.logic.getListOfRunsFromSessionFile(self.currentSessionFilePath)
-        self.updateRunsToReview(listOfRuns)
-
-  def updateRunsToReview(self, listOfRuns):
-    """From a list of runs (filenames of recordings), update the dropdown"""
+  def updateRunsToReview(self):
+    """From the current session object, update the dropdown"""
     # Remove all items
     self.runToReviewComboBox.clear()
-    if listOfRuns:
-      for runFileName in listOfRuns:
-        self.runToReviewComboBox.addItem(runFileName)
+    scopeRuns = self.currentSession.getListOfScopeRuns()
+    scopeRunDict = dict()
+    for idx, S in enumerate(scopeRuns):
+       key = f"Run{idx}"
+       scopeRunDict[key] = S
+    self.scopeRunDict = scopeRunDict
+    if len(scopeRuns)>0:
+      for runKey in scopeRunDict.keys():
+        self.runToReviewComboBox.addItem(runKey)
     else: 
        self.runToReviewComboBox.addItem('*no runs recorded this session*')
     
@@ -1213,14 +931,27 @@ class ExampleGuideletGuidelet(Guidelet):
     # Not sure why 'EmTrackerToHeadSenso' didn't exist yet, trying processing events here
     slicer.app.processEvents() 
 
+    # Which phantom??
+    usingPegNeckHead = False
+    usingScannedRigidNeckHead = True # TODO: make this switchable as a configuration
+    if usingPegNeckHead:
+       AIRWAYZONE_SEGMENTATION = PEGNECK_AIRWAYZONE_SEGMENTATION
+    elif usingScannedRigidNeckHead:
+       AIRWAYZONE_SEGMENTATION = RIGIDNECK_AIRWAYZONE_SEGMENTATION
+       # Load matching STL
+       outerModelNode = slicer.util.loadModel(RIGIDNECK_STL)
+       outerModelNode.GetDisplayNode().SetOpacity(0.1)
+       
     # Load airwayZone segmentation
-    airwayZoneSegmentationNode = slicer.util.loadSegmentation(DEFAULT_AIRWAYZONE_SEGMENTATION)
+    airwayZoneSegmentationNode = slicer.util.loadSegmentation(AIRWAYZONE_SEGMENTATION)
     self.parameterNode.SetNodeReferenceID('airwayZoneSegmentationNode', airwayZoneSegmentationNode.GetID())
     self.airwayZoneSegmentationNodeSelector.setCurrentNodeID(airwayZoneSegmentationNode.GetID())
     # loading segmentation here also buys some more time for the transforms to get fully loaded into the scene
+    self.adjustSegmentationDisplay(airwayZoneSegmentationNode)
+    # Center the 3D scene so segmentation is visible
+    self.center3Dview()
 
-    # Use PegNeckHead?
-    usingPegNeckHead = True
+    
     slicer.app.processEvents()
     # Hide slice view annotations (patient name, scale, color bar, etc.) as they
     # decrease reslicing performance by 20%-100%
@@ -1241,6 +972,9 @@ class ExampleGuideletGuidelet(Guidelet):
        # Conclude we are in testing mode for now
        slicer.util.errorDisplay("Expected transform not found, running it test/debug mode!")
        return # return early since the rest of the method will fail
+    
+    
+
 
     self.EmTrackerToHeadSensor = slicer.util.getNode('EmTrackerToHeadSenso')
     self.StylusSensorToEmTracker = slicer.util.getNode('StylusSensorToEmTrac')
@@ -1249,6 +983,8 @@ class ExampleGuideletGuidelet(Guidelet):
     if usingPegNeckHead:
       #self.HeadSensorToHeadSTL = slicer.util.getNode('HeadSensorToPegHeadS')
       self.HeadSensorToHeadSTL = slicer.util.getNode('HeadSensorToNewPegHe')
+    elif usingScannedRigidNeckHead:
+      self.HeadSensorToHeadSTL = slicer.util.getNode('HeadSensorToRigidHea')
     else:
       self.HeadSensorToHeadSTL = slicer.util.getNode('HeadSensorToHeadSTL')
     try:
@@ -1296,6 +1032,38 @@ class ExampleGuideletGuidelet(Guidelet):
     
     return
 
+  def adjustSegmentationDisplay(self, airwayZoneSegmentationNode):
+    # Set opacity to transparent
+    dn = airwayZoneSegmentationNode.GetDisplayNode()
+    dn.SetOpacity(0.2)
+    seg = airwayZoneSegmentationNode.GetSegmentation()
+    # Set airwayZone as visible but totally transparent
+    airwayZoneSegmentID = seg.GetSegmentIdBySegmentName('airwayZone')
+    dn.SetSegmentVisibility(airwayZoneSegmentID, True)
+    dn.SetSegmentOpacity(airwayZoneSegmentID, 0)
+    # Set AirwayLumen as visible and opaque
+    airwayLumenSegmentID = seg.GetSegmentIdBySegmentName('AirwayLumen')
+    dn.SetSegmentVisibility(airwayLumenSegmentID, True)
+    dn.SetSegmentOpacity(airwayLumenSegmentID, 1)
+    # Set outer surface as visible but almost totally transparent
+    outerSegSegmentID = seg.GetSegmentIdBySegmentName('Rigid Sinus Model_FullyAssembled') # name for pegneck segmentation, no corresponding segment for RigidNeck
+    if not outerSegSegmentID=='':
+      dn.SetSegmentVisibility(outerSegSegmentID, True)
+      dn.SetSegmentOpacity(outerSegSegmentID, 0.25) # multiplied by the overall opacity
+    # Set all other segments as not visible
+    for idx in range(seg.GetNumberOfSegments()):
+       segID = seg.GetNthSegmentID(idx)
+       if segID not in [airwayZoneSegmentID, airwayLumenSegmentID, outerSegSegmentID]:
+          dn.SetSegmentVisibility(segID, False)
+
+
+
+  def center3Dview(self):
+    layoutManager = slicer.app.layoutManager()
+    threeDWidget = layoutManager.threeDWidget(0)
+    threeDView = threeDWidget.threeDView()
+    threeDView.resetFocalPoint()
+
   def recordingCommandCompleted(self, command, q):
     """ lifted from AirwayTrackerClass.py """
     statusText = "Recording "
@@ -1314,20 +1082,17 @@ class ExampleGuideletGuidelet(Guidelet):
     return transformNode
 
   def disconnect(self):#TODO see connect
-    logging.debug('ScoliUs.disconnect()')
+    logging.debug('ExampleGuideletGuidelet.disconnect()')
     Guidelet.disconnect(self)
     # Disconnect buttons (moved from AirwayTrackerClass.preCleanup -> disconnect)
     self.startStopRecordingButton.disconnect('clicked(bool)', self.onStartStopRecordingClicked)
+    self.userNameLineEdit.disconnect('editingFinished()', self.updateParameterNodeFromGuideletGUI)
+    self.roleComboBox.disconnect('currentIndexChanged(int)', self.updateParameterNodeFromGuideletGUI)
+    self.experienceLevelComboBox.disconnect('currentIndexChanged(int)', self.updateParameterNodeFromGuideletGUI)
+    self.saveUserInfoButton.disconnect('clicked(bool)', self.saveUserInfoButtonClicked)
+    self.displaySelectedRunButton.codisconnectnnect('clicked(bool)', self.onDisplaySelectedRunClicked)
 
-    # Remove observer to old parameter node
-    if self.patientSLandmarks_Reference and self.patientSLandmarks_ReferenceObserver:
-      self.patientSLandmarks_Reference.RemoveObserver(self.patientSLandmarks_ReferenceObserver)
-      self.patientSLandmarks_ReferenceObserver = None
-
-    #self.calibrationCollapsibleButton.disconnect('toggled(bool)', self.onPatientSetupPanelToggled)
-    #self.exampleButton.disconnect('clicked(bool)', self.onExampleButtonClicked)
-
-
+    
   def patientSetupPanel(self):
     logging.debug('patientSetupPanel')
 
@@ -1354,21 +1119,13 @@ class ExampleGuideletGuidelet(Guidelet):
     self.runToReviewComboBox = loadedUI.RunToReviewComboBox
     self.expertRunToCompareComboBox = loadedUI.ExpertRunToCompareComboBox
     self.displaySelectedRunButton = loadedUI.DisplaySelectedRunButton
+    self.expertRunToCompareLabel = loadedUI.ExpertRunToCompareLabel
+    self.runToReviewLabel = loadedUI.RunToReviewLabel
 
-    ##
-    """
-    self.calibrationCollapsibleButton.setProperty('collapsedHeight', 20)
-    self.calibrationCollapsibleButton.text = 'Calibration'
-    self.sliceletPanelLayout.addWidget(self.calibrationCollapsibleButton)
-
-    self.calibrationButtonLayout = qt.QFormLayout(self.calibrationCollapsibleButton)
-    self.calibrationButtonLayout.setContentsMargins(12, 4, 4, 4)
-    self.calibrationButtonLayout.setSpacing(4)
-
-    self.exampleButton = qt.QPushButton("Example button")
-    self.exampleButton.setCheckable(False)
-    self.calibrationButtonLayout.addRow(self.exampleButton)
-    """
+    #### TEMPORARY CHANGES ####
+    self.displaySelectedRunButton.setText('Display Selected Run') # instead of runs
+    self.expertRunToCompareComboBox.hide()
+    self.expertRunToCompareLabel.hide()
 
 
   def onExampleButtonClicked(self, toggled):
@@ -1378,9 +1135,7 @@ class ExampleGuideletGuidelet(Guidelet):
   def onPatientSetupPanelToggled(self, toggled):
     if toggled == False:
       return
-
     logging.debug('onPatientSetupPanelToggled: {0}'.format(toggled))
-
     #self.selectView(self.VIEW_ULTRASOUND_3D)
 
 	

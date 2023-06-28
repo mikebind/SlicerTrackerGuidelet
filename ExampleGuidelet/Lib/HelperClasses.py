@@ -6,16 +6,19 @@ import re
 import slicer, vtk
 
 class Session(object):
-    def __init__(self,userDataDict, listOfRecordings=[]):
+    def __init__(self, userDataDict, listOfRecordings=None):
         logging.debug('Session object init()')
         self.userDataDict = userDataDict
         self.sessionCreationTime = time.strftime(r"%Y-%m-%d-%H%M%S")
         self.sessionSavedFlag = False
         self.savedFilePathName = None # empty until saved
-        self.listOfRecordings = listOfRecordings
+        self.listOfRecordings = listOfRecordings or [] # default to empty list
+        
 
-    def saveToFile(self, saveDir):
+    def saveToFile(self, saveDir=None):
         logging.debug('Session.saveToFile()')
+        if saveDir is None and self.sessionSavedFlag:
+            saveDir = os.path.dirname(self.savedFilePathName)
         saveFileName = self.getSaveFileName()
         saveFileText = self.getSaveFileText()
         saveFilePathName = os.path.join(saveDir, saveFileName)
@@ -28,8 +31,21 @@ class Session(object):
         logging.debug('Session.getSaveFileText()')
         headerTextList = [val for val in self.userDataDict.values()]
         delimLine = "---" # delimiter line separating header from the rest
-        recordingsLines = [recObj.recordingFilePath for recObj in self.listOfRecordings]
-        saveFileText = "\n".join([*headerTextList,delimLine,*recordingsLines]) +"\n"
+        sections = []
+        sections.extend(headerTextList)
+        sections.append(delimLine)
+        for recObj in self.listOfRecordings:
+            section = []
+            # Record file path and then scope run data
+            recObjFilePath = recObj.recordingFilePath
+            section.append(recObjFilePath)
+            section.append(delimLine)
+            for scopeRun in recObj.listOfScopeRuns:
+                scopeRunText = scopeRun.getSaveDataText()
+                section.append(scopeRunText)
+                section.append(delimLine)
+            sections.extend(section)
+        saveFileText = "\n".join(sections)
         return saveFileText
 
     def getSaveFileName(self):
@@ -76,9 +92,10 @@ class Recording(object):
 
     def processRecordingToScopeRuns(self, sceneLeafTransformNode, segmentationNode, airwayZoneSegmentName='airwayZone'):
         logging.debug('Recording.processRecordingToScopeRuns()')
-        scopeRuns = self.processRecordingFileToScopeRuns(self.recordingFilePath, sceneLeafTransformNode, segmentationNode, airwayZoneSegmentName)
+        scopeRuns = Recording.processRecordingFileToScopeRuns(self.recordingFilePath, sceneLeafTransformNode, segmentationNode, airwayZoneSegmentName)
         for scopeRun in scopeRuns:
             scopeRun.setParentRecordingObject(self)
+        self.listOfScopeRuns = scopeRuns
 
     @classmethod 
     def processRecordingFileToScopeRuns(cls, recordingFilePath, sceneLeafTransformNode, segmentationNode, airwayZoneSegmentName='airwayZone'):
@@ -106,7 +123,7 @@ class Recording(object):
             runData = np.array(runData)
             runPositions = positions[runData, : ]
             runOrientations = orientations[runData, : ]
-            runTimeStamps = timeStamps[runData, : ]
+            runTimeStamps = timeStamps[runData] # timeStamps is 1-D
             scopeRun = ScopeRun(None, runTimeStamps, runPositions, runOrientations)
             scopeRuns.append(scopeRun)
         return scopeRuns
@@ -165,19 +182,58 @@ class Recording(object):
 
 
 class ScopeRun(object):
-    def __init__(self, parentRecordingObject, timestamps, positions, orientations):
+    def __init__(self, parentRecordingObject, timeStamps, positions, orientations):
         logging.debug('ScopeRun object init()')
         self.parentRecording = parentRecordingObject
-        self.timeStamps = timestamps
+        self.timeStamps = timeStamps
         self.positions = positions
         self.orientations = orientations
+        self.coneModel = None
+        self.tubeModel = None
 
     def setParentRecordingObject(self, parentRecordingObject):
         logging.debug('ScopeRun.setParentRecordingObject()')
         self.parentRecording = parentRecordingObject
 
+    def getSaveDataText(self):
+        # organize data into saveable text format
+        # TODO make this a better format (csv?)
+        sections = []
+        sections.append('\nPostions:')
+        positions_string = np.array2string(self.positions)
+        sections.append(positions_string)
+        sections.append('\nOrientations:')
+        ori_string = np.array2string(self.orientations)
+        sections.append(ori_string)
+        sections.append('\nTimeStamps:')
+        timeStampsCol = self.timeStamps.reshape((len(self.timeStamps), 1)) # reformat to one number per column
+        tstamp_string = np.array2string(timeStampsCol)
+        sections.append(tstamp_string)
+        saveDataText = "\n".join(sections)
+        return saveDataText
+
     def saveToFile(self, saveDir):
         logging.debug('ScopeRun.saveToFile()')
+
+    def createModelNodes(self, show=False):
+        logging.debug('ScopeRun.createModelNode()')
+        if self.positions is None or len(self.positions) < 1:
+            raise(Exception("Can't create model node without positions!"))
+        self.coneModel, self.tubeModel = modelNodesFromPositionsAndOrientations(self.positions, self.orientations, scalars=None, sizeFactor=3.0)
+        if not show:
+            self.hideModelNodes()
+    
+    def showModelNodes(self):
+        logging.debug('ScopeRun.showModelNodes()')
+        self.coneModel.GetDisplayNode().SetVisibility(True)
+        self.tubeModel.GetDisplayNode().SetVisibility(True)
+
+    def hideModelNodes(self):
+        logging.debug('ScopeRun.hideModelNodes()')
+        self.coneModel.GetDisplayNode().SetVisibility(False)
+        self.tubeModel.GetDisplayNode().SetVisibility(False)
+
+
 
 
 ## Helper functions not tied to a class or instance
@@ -246,7 +302,7 @@ def positions_from_transform_hierarchy(transformsList):
         orientations[frameNum,:] = currentOrientation4[0:3]
     return positions, orientations
 
-def identifyTrackingRunsFromRawPath(positions, segmentationNode, airwayZoneSegmentName, minimumRunLengthPoints=100):
+def identifyTrackingRunsFromRawPath(positions, segmentationNode, airwayZoneSegmentName, minimumRunLengthPoints=30):
     """Using a segmentation node which has a segment for the airway zone, combined
     with a set of sequentual positions, divide these positions in to "runs".  
     A run is a (mostly) contiguous section of the position indices which includes at least one
@@ -273,8 +329,7 @@ def identifyTrackingRunsFromRawPath(positions, segmentationNode, airwayZoneSegme
     
     while np.any(airwayZoneMask==1):
         # Find first deep point index
-        firstDeepIdx = np.argmax(airwayZoneMask)
-        startIdx = firstDeepIdx
+        startIdx = np.argmax(airwayZoneMask)
         # Run forwards to find the last contiguous point which is still in zone
         stopIdx = startIdx+1
         while True:
@@ -295,12 +350,18 @@ def identifyTrackingRunsFromRawPath(positions, segmentationNode, airwayZoneSegme
     runDataGaps = np.array([runsData[idx+1][0] - runsData[idx][-1] for idx in range(len(runsData)-1)])
     while np.any(runDataGaps <= RUN_GAP_TOLERANCE):
         # Merge the first one and then see if any remain
-        firstGapBelowTolIdx = np.nonzero(runDataGaps <= RUN_GAP_TOLERANCE)[0]
-        runsData[firstGapBelowTolIdx] = [*runsData[firstGapBelowTolIdx], *runsData[firstDeepIdx+1]]
+        firstGapBelowTolIdx = np.nonzero(runDataGaps <= RUN_GAP_TOLERANCE)[0][0] # np.nonzero result is for 
+        # 2D even if input is 1D, the first [0] is to get to the first dimension index answers, the second [0]
+        # is because we want the first index in the first dimension
+        runsData[firstGapBelowTolIdx] = [*runsData[firstGapBelowTolIdx], *runsData[firstGapBelowTolIdx+1]]
         del runsData[firstGapBelowTolIdx+1] # remove duplicate of merged section
         logging.debug(f"  Merged run {firstGapBelowTolIdx} and {firstGapBelowTolIdx+1} because gap was < {RUN_GAP_TOLERANCE} points!")
         runDataGaps = np.array([runsData[idx+1][0] - runsData[idx][-1] for idx in range(len(runsData)-1)])
     # Enforce minimum run lengths
+    runLengths = np.array([len(runData) for runData in runsData])
+    numTooShortRuns = np.count_nonzero(runLengths<minimumRunLengthPoints)
+    if numTooShortRuns > 0:
+        logging.debug(f"   Dropped {numTooShortRuns} for being less than {minimumRunLengthPoints} points long")
     runsData = [runData for runData in runsData if len(runData)>=minimumRunLengthPoints]
     
     return runsData
@@ -356,3 +417,110 @@ def getSegmentNamesAtRasPoint(segmentationNode,rasPoints=[[0,0,0],[1,1,1]], incl
     sliceNode.SetSliceOffset(oldOffset)
     segmentationNode.RemoveNthDisplayNodeID(segmentationNode.GetNumberOfDisplayNodes()-1)
     return segmentNames
+
+def modelNodesFromPositionsAndOrientations(positions, orientations, scalars=None, sizeFactor=2.0):
+    """Create model node with polydata (for non-interactive version of markups)
+    Positions will be centers of cones, cones will point the tip in the directions of orientations,
+    cones will be sized individually by scalars and then uniformly multiplied by sizeFactor. 
+    Helpful links: 
+    https://www.dillonbhuff.com/?p=540
+    https://vtk.org/doc/release/5.0/html/a01880.html#:~:text=vtkPolyData%20is%20a%20data%20object,also%20are%20represented.
+    """
+    # TODO: Add velocities (size), deviations from expert (color)?
+    import numpy as np
+    pointsArray = positions # an nx3 numpy array
+    numPoints = pointsArray.shape[0]
+    #diffs = np.diff(pointsArray, axis=0)
+    # Expand scalars to array if needed 
+    if scalars is None:
+        scalars = np.ones(numPoints)
+    elif isinstance(scalars, (list, tuple, np.ndarray)) and len(scalars)==1:
+        scalars = scalars[0] * np.ones(numPoints)
+    else:
+        # Single value not in a list
+        scalars = scalars * np.ones(numPoints)
+
+    # Create VTK arrays needed for model node
+    points = vtk.vtkPoints() # actual pointData locations
+    vertices = vtk.vtkCellArray() # handles vertex locations (in our case this will just be all the points, but note that
+    # points could be a superset of vertices because points could include the endpoints of lines or corners of polygons 
+    # which don't themselves have to be in the list of vertices.  Vertices are what the vtkGlyph3D filter operates on
+    lines = vtk.vtkCellArray() # handles lines (and same type would handle polygons if those were being used)
+
+    vectors = vtk.vtkFloatArray() # this will affect glyph orientation and is going to be set to the vector to the next point
+    vectors.SetNumberOfComponents(3)
+    vectors.SetName("Directions")
+
+    sizes = vtk.vtkFloatArray() # this will go in scalars 
+    sizes.SetName("Sizes")
+    #colors = vtk.vtkFloatArray()
+    #colors.SetName("Colors"
+
+    # Assemble arrays of values
+    for point, orientation, scalar in zip(positions,orientations,scalars):
+        pointID = points.InsertNextPoint(point)
+        # Vertices
+        cellID = vertices.InsertNextCell(1) # allocates a next cell with space for one point ID (lines would have 2, triangles 3, polygons N)
+        vertices.InsertCellPoint(pointID) # fills the first (and only) slot for this cell
+        # Vectors
+        vectorID = vectors.InsertNextTuple(orientation)
+        # Speed?? Could be calculated here and used to size the cones? TODO
+        sizes.InsertNextValue(scalar * sizeFactor)
+        if pointID != (numPoints-1):
+            # Add a line unless this is the very last point
+            lines.InsertNextCell(2)
+            # allocates a next cell with space for two pointIDs (the endpoints of the line)
+            lines.InsertCellPoint(pointID)
+            lines.InsertCellPoint(pointID+1)
+            #size = e[i] * sizeFactor
+            #_ = sizes.InsertNextValue(size)
+            #colorIdx = cmapIndices[i]
+            #_ = colors.InsertNextValue(colorIdx)
+        
+    ## Create the vtkPolyData
+    pointsPolyData = vtk.vtkPolyData()
+    pointsPolyData.SetPoints(points)
+    pointsPolyData.SetVerts(vertices)
+    pointsPolyData.SetLines(lines)
+    pointsData = pointsPolyData.GetPointData()
+    _ = pointsData.SetScalars(sizes)  #scalars are literally used as size scale factors, I think
+    _ = pointsData.SetVectors(vectors)
+    #_ = pointsData.AddArray(colors)
+
+    #sphere = vtk.vtkSphereSource()  # ConeSource()
+    cone = vtk.vtkConeSource()
+    cone.SetResolution(18)
+
+    linesPolyData = vtk.vtkPolyData()
+    linesPolyData.SetPoints(points)
+    linesPolyData.SetLines(lines)
+
+    tubeFilter = vtk.vtkTubeFilter()
+    tubeFilter.SetInputData(linesPolyData)
+    tubeFilter.SetRadius(0.25) # tube radius mm
+    tubeFilter.SetNumberOfSides(15)
+
+    glyphFilter = vtk.vtkGlyph3D()
+    glyphFilter.SetSourceConnection(cone.GetOutputPort())
+    glyphFilter.SetInputData(pointsPolyData)
+
+    coneModel = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLModelNode", 'OriCones')
+    coneModel.CreateDefaultDisplayNodes()
+    # modelDisplay = coneModel.GetDisplayNode()
+    # modelDisplay.SetAndObserveColorNodeID('vtkMRMLColorTableNodeFileViridis.txt')
+    #modelDisplay.SetAndObserveColorNodeID(
+    #    "vtkMRMLColorTableNodeFileColdToHotRainbow.txt"
+    #)
+    # Color table names can be found at https://apidocs.slicer.org/master/classvtkMRMLColorLogic.html
+    # I found that changing the color using the Model display node GUI crashes slicer, I don't know why
+    #modelDisplay.SetScalarVisibility(True)
+    #modelDisplay.SetActiveScalarName("Colors")
+
+    # Connect to glyph output
+    coneModel.SetPolyDataConnection(glyphFilter.GetOutputPort())
+
+    # Lines version
+    tubeModel = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLModelNode', 'Tube')
+    tubeModel.CreateDefaultDisplayNodes()
+    tubeModel.SetPolyDataConnection(tubeFilter.GetOutputPort())
+    return coneModel, tubeModel
