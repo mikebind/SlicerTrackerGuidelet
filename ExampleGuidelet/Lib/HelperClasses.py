@@ -305,7 +305,7 @@ def identifyTrackingRunsFromRawPath(positions, segmentationNode, airwayZoneSegme
     
     return runsData
 
-def getSegmentNamesAtRasPoint(self, segmentationNode,rasPoints=[[0,0,0],[1,1,1]], includeHiddenSegments=True, sliceViewLabel='Green'):
+def getSegmentNamesAtRasPoint(segmentationNode,rasPoints=[[0,0,0],[1,1,1]], includeHiddenSegments=True, sliceViewLabel='Green'):
     """ Returns names of segments at the rasPoint location.  If includeHiddenSegments is false (default is True)
     then only currently visible segments (in the first display node) will be included as possible outputs. 
     If true (now the default), then all segments will be included, regardless of current visibility. It is possible 
