@@ -96,6 +96,7 @@ class ExampleGuideletWidget(GuideletWidget):
 HEAD_SENSOR_TRANSFORM_POSITION_IN_HIERARCHY = 1
 SCOPE_SENSOR_TRANSFORM_POSITION_IN_HIERARCHY = 2
 DEFAULT_LEAF_TRANSFORM_NODE_NAME = 'Extra'
+DEFAULT_AIRWAYZONE_SEGMENTATION = "Resources/airwayZoneSegmentation.seg.nrrd"
 
 class ExampleGuideletLogic(GuideletLogic):
   """Uses GuideletLogic base class, available at:
@@ -106,6 +107,7 @@ class ExampleGuideletLogic(GuideletLogic):
     GuideletLogic.__init__(self, parent)
 
   def createSessionFile(self, headerList, currentSessionFilePath):
+    raise(Exception('ExampleGuidelet.createSessionFile() accessed, but functionality moved to Session objects!'))
     """Create a file to hold the results of a session for a single user.  This should be
     called whenever new user information is saved.  Whenever recordings are started/finished,
     a line should be added to the session file saying where the file is saved and what the 
@@ -137,8 +139,9 @@ class ExampleGuideletLogic(GuideletLogic):
     currentSessionFilePath = os.path.join(sessionDirectory, f"{sessionFilePrefix}{userName.replace(' ','_')}-{timeStamp}.txt")
     return currentSessionFilePath
 
-  # Next goal - write test to process multiple files and crop them to just inside paths
+  
   def processTrackerFileToRuns(self, mhaFile, segmentationNode, entryRegionName='entryZone', deeperRegionName='deeperZone'):
+      raise(Exception("don't use, functionality transferred to Recording objects"))
       """Inputs are name/path to saved tracker recording file, segmentation node with segments 
       an entry zone and a deeper zone (used to define what counts as a run and how they should 
       trimmed). 
@@ -399,6 +402,7 @@ class ExampleGuideletLogic(GuideletLogic):
 
 
   def identifyTrackingRunsFromRawPath(self, positionsArray, segmentationNode, entryRegionName='entryZone', deeperRegionName='deeperZone'):
+      raise(Exception('accessed ExampleGuidelet.identifyTrackingRunsFromRawPath, do not do that'))
       """ This function should take a markupsNode and process it's control points to trim out unnecessary
       points from before entering the nose and after exiting the nose.  To count as a run, perhaps it should 
       have points both in an "entry" region, and a "deeper" region.  Typical runs would start outside the 
@@ -467,57 +471,7 @@ class ExampleGuideletLogic(GuideletLogic):
           deepMask[startIdx:(lastIdx+1)] = 0
       return runsData
 
-  def getSegmentNamesAtRasPoint(self, segmentationNode,rasPoints=[[0,0,0],[1,1,1]], includeHiddenSegments=False, sliceViewLabel='Red'):
-      """ Returns names of segments at the rasPoint location.  If includeHiddenSegments is false (default)
-      then only currently visible segments (in the first display node) will be included as possible outputs. 
-      If changed to true, then all segments will be included, regardless of current visibility. It is possible 
-      to specify which slice you want to do the query in by specifying a different sliceViewLabel.  I have not
-      tested whether the slice view needs to be included in the current layout or if it needs to be visible.
-      rasPoints can be a list of 3 element lists or an nx3 numpy array.
-      
-      Important NOTE: GetVisibleSegmentsForPosition() only identifies segments which are VISIBLE and are IN THE SLICE PLANE of 
-      the selected slice view label.  It is not good enough that the segmentation visibility is turned
-      on there, the segment itself must show up in that slice plane (though it doesn't seem to need to
-      actually be showing on the screen; for example, if you zoom in or pan that segment off the side of 
-      the slice view it still works, but if you scroll away to a slice plane which does not contain the 
-      segment it does not work). This function gets around that limitation by 1) jumping the slice view
-      to the plane containing the rasPoint and 2) creating a temporary segmentation display node which 
-      ensures that the segmentation is visible in the selected slice view.
-      """
-      ##sliceNode = slicer.mrmlScene.GetNodeByID(f'vtkMRMLSliceNode{sliceViewLabel}')
-      sliceViewWidget = slicer.app.layoutManager().sliceWidget(sliceViewLabel)
-      # Store the old offset so that we can reset to this after jumping
-      sliceNode = sliceViewWidget.mrmlSliceNode()
-      oldOffset = sliceNode.GetSliceOffset()
-      # Ensure segmentation is visible in this slice widget (otherwise the list will never return any segment names)
-      tempDisplayNode = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLSegmentationDisplayNode')
-      if not includeHiddenSegments:
-          # Copy everything (crucially, including current segment visibility settings)
-          tempDisplayNode.Copy(segmentationNode.GetDisplayNode()) 
-          # If this is not done, all segments are visible by default, and therefore will be included in the output
-      tempDisplayNode.SetVisibility3D(0) # no need to show in 3D
-      tempDisplayNode.SetVisibility2D(1)
-      tempDisplayNode.SetViewNodeIDs((sliceNode.GetID(),))
-      tempDisplayNode.SetVisibility(1)
-      segmentationNode.AddAndObserveDisplayNodeID(tempDisplayNode.GetID())
-      
-      segmentationsDisplayableManager = sliceViewWidget.sliceView().displayableManagerByClassName("vtkMRMLSegmentationsDisplayableManager2D")
-      # Loop over ras points
-      segmentNames = []
-      nPoints = len(rasPoints)
-      for pointIdx in range(nPoints):
-          rasPoint = rasPoints[pointIdx]
-          # Jump to slice containing query point
-          sliceNode.JumpSliceByOffsetting(*rasPoint)
-          # Get list of segment names at that point
-          segmentIds = vtk.vtkStringArray()
-          segmentationsDisplayableManager.GetVisibleSegmentsForPosition(rasPoint, tempDisplayNode, segmentIds)
-          segmentNamesForCurrentPoint = [segmentationNode.GetSegmentation().GetSegment(segmentIds.GetValue(idx)).GetName()  for idx in range(segmentIds.GetNumberOfValues())]
-          segmentNames.append(segmentNamesForCurrentPoint)
-      # Restore prior state
-      sliceNode.SetSliceOffset(oldOffset)
-      segmentationNode.RemoveNthDisplayNodeID(segmentationNode.GetNumberOfDisplayNodes()-1)
-      return segmentNames
+ 
 
   def mhaTesting(self, mhaFile=None):
       if mhaFile is None:
@@ -537,6 +491,7 @@ class ExampleGuideletLogic(GuideletLogic):
       return timeStamps, curveNode, positions, headSensorTransforms, scopeSensorTransforms
   
   def gatherTransformsFromTransformHierarchy(self, leafTransformNode):
+    raise(Exception('Accessed ExampleGuidelet.gatherTransformsFromTransformHierarchy(), use recordings version instead'))
     """ Use the existing scene transform hierarchy to build transformList
     """
     shNode = slicer.mrmlScene.GetSubjectHierarchyNode()
@@ -630,6 +585,7 @@ class ExampleGuideletLogic(GuideletLogic):
 
 
   def import_tracker_recording(self, mha_file_path):
+      raise(Exception('Accessed ExampleGuidelet.import_tracker_recording(). Use Recording class version instead!'))
       """Import the sequence of transforms stored in one of the guidelet mhd files.
       """
       import numpy as np
@@ -1006,8 +962,9 @@ class ExampleGuideletGuidelet(Guidelet):
      self.parameterNode.SetParameter('experienceLevelComboBoxCurrentString', self.experienceLevelComboBox.currentText)
      self.parameterNode.SetParameter('roleComboBoxCurrentIndex', str(self.roleComboBox.currentIndex))
      self.parameterNode.SetParameter('roleComboBoxCurrentText', self.roleComboBox.currentText)
-     
-  
+     self.parameterNode.SetParameter('airwayZoneSegmentationNodeID', self.airwayZoneSegmentationNodeSelector.currentNodeID)
+     self.parameterNode.SetParameter('leafTransformNodeID', self.leafTransformNodeSelector.currentNodeID)
+
   def updateGuideletGUIFromParameterNode(self, caller=None, event=None):
      """ Update Guidelet GUI elements from parameter values"""
      if self.parameterNode is None or self._updatingGuideletGUIFromParameterNode:
@@ -1020,6 +977,9 @@ class ExampleGuideletGuidelet(Guidelet):
      # current text is updated automatically with the index update ^^
      # Role
      self.roleComboBox.setCurrentIndex(int(self.parameterNode.GetParameter('roleComboBoxCurrentIndex')))
+     # AirwayZone Segmentation
+     self.airwayZoneSegmentationNodeSelector.setCurrentNodeID(self.parameterNode.GetParameter('airwayZoneSegmentationNodeID'))
+     self.leafTransformNodeSelector.setCurrentNodeID(self.parameterNode.GetParameter('leafTransformNodeID'))
      # List of runs
      # List of expert runs
      # NOTE: Parameter node settings related to the Advanced panel are handled in Guidelet.py
@@ -1152,7 +1112,7 @@ class ExampleGuideletGuidelet(Guidelet):
 
         logging.info("Starting recording to: {0}".format(self.recordingFileName))
 
-        self.logic.appendToSessionFile(self.recordingFileName, self.currentSessionFilePath)
+        self.logic.appendToSessionFile(self.recordingFileName, self.currentSession.savedFilePathName)
 
         self.plusRemoteNode.SetCurrentCaptureID(self.captureDeviceName)
         self.plusRemoteNode.SetRecordingFilename(self.recordingFileName)
@@ -1166,8 +1126,18 @@ class ExampleGuideletGuidelet(Guidelet):
         logging.info("Stopping recording")
         self.plusRemoteNode.SetCurrentCaptureID(self.captureDeviceName)
         self.plusRemoteLogic.StopRecording(self.plusRemoteNode)
+        # Add the new recording to the current session
+        recordingsDirectory = self.parameterNode.GetParameter('PlusAppDataDirectory')
+        newRecording = Recording(self.currentSession, os.path.join(recordingsDirectory, self.recordingFileName))
+        self.currentSession.addRecording(newRecording)
+        newRecording.processRecordingToScopeRuns(self.sceneLeafTransformNode, self.airwayZoneSegmentationNode, 'airwayZone')
+
+
         # Add the current run to the current dropdown list of RunsData. TODO!
-        listOfRuns = self.logic.getListOfRunsFromSessionFile(self.currentSessionFilePath)
+        listOfRecordingFileNames = self.currentSession.getListOfRecordingFileNames()
+
+        # Actually, this ^^ should be the a list of runs, not list of recording file names TODO TODO TODO
+        #listOfRuns = self.logic.getListOfRunsFromSessionFile(self.currentSessionFilePath)
         self.updateRunsToReview(listOfRuns)
 
   def updateRunsToReview(self, listOfRuns):
@@ -1237,29 +1207,7 @@ class ExampleGuideletGuidelet(Guidelet):
 
     # Transforms
 
-    logging.debug('Create transforms')
-
-    '''
-    In this example we assume that there is a tracked needle in the system. The needle is not
-    tracked at its tip, so we need a NeedleTipToNeedle transform to define where the needle tip is.
-    In your application Needle may be called Stylus, or maybe you don't need such a tool at all.
-    '''
-
-    ## self.needleToReference = slicer.util.getNode('NeedleToReference')
-    ## if not self.needleToReference:
-    ##   self.needleToReference = slicer.vtkMRMLLinearTransformNode()
-    ##   self.needleToReference.SetName('NeedleToReference')
-    ##   slicer.mrmlScene.AddNode(self.needleToReference)
-
-    ## self.needleTipToNeedle = slicer.util.getNode('NeedleTipToNeedle')
-    ## if not self.needleTipToNeedle:
-    ##   self.needleTipToNeedle = slicer.vtkMRMLLinearTransformNode()
-    ##   self.needleTipToNeedle.SetName('NeedleTipToNeedle')
-    ##   m = self.logic.readTransformFromSettings('NeedleTipToNeedle', self.configurationName)
-    ##   if m:
-    ##     self.needleTipToNeedle.SetMatrixTransformToParent(m)
-    ##   slicer.mrmlScene.AddNode(self.needleTipToNeedle)
-
+    logging.debug('Gather transforms')
 
     # Check if expected transforms are available
     try:
@@ -1315,6 +1263,12 @@ class ExampleGuideletGuidelet(Guidelet):
     ## self.needleToReference.SetAndObserveTransformNodeID(self.referenceToRas.GetID())
     ## self.needleTipToNeedle.SetAndObserveTransformNodeID(self.needleToReference.GetID())
     ## self.needleModel.SetAndObserveTransformNodeID(self.needleTipToNeedle.GetID())
+
+    # Load airwayZone segmentation
+    airwayZoneSegmentationNode = slicer.util.loadSegmentation(DEFAULT_AIRWAYZONE_SEGMENTATION)
+    self.parameterNode.SetParameter('airwayZoneSegmentationNodeID', airwayZoneSegmentationNode.GetID())
+    # Set "Extra" as default leaf node for processing
+    self.parameterNode.SetParameter('leafTransformNodeID', self.ExtraTransform.GetID()) 
     return
 
   def recordingCommandCompleted(self, command, q):
