@@ -96,7 +96,8 @@ class ExampleGuideletWidget(GuideletWidget):
 HEAD_SENSOR_TRANSFORM_POSITION_IN_HIERARCHY = 1
 SCOPE_SENSOR_TRANSFORM_POSITION_IN_HIERARCHY = 2
 DEFAULT_LEAF_TRANSFORM_NODE_NAME = 'Extra'
-DEFAULT_AIRWAYZONE_SEGMENTATION = "Resources/airwayZoneSegmentation.seg.nrrd"
+moduleDir = os.path.dirname(__file__)
+DEFAULT_AIRWAYZONE_SEGMENTATION = os.path.join(moduleDir, "Resources","airwayZoneSegmentation.seg.nrrd")
 
 class ExampleGuideletLogic(GuideletLogic):
   """Uses GuideletLogic base class, available at:
@@ -1194,6 +1195,13 @@ class ExampleGuideletGuidelet(Guidelet):
 
     # Not sure why 'EmTrackerToHeadSenso' didn't exist yet, trying processing events here
     slicer.app.processEvents() 
+
+    # Load airwayZone segmentation
+    airwayZoneSegmentationNode = slicer.util.loadSegmentation(DEFAULT_AIRWAYZONE_SEGMENTATION)
+    self.parameterNode.SetParameter('airwayZoneSegmentationNodeID', airwayZoneSegmentationNode.GetID())
+    self.airwayZoneSegmentationNodeSelector.setCurrentNodeID(airwayZoneSegmentationNode.GetID())
+    
+
     # Use PegNeckHead?
     usingPegNeckHead = True
     slicer.app.processEvents()
@@ -1264,11 +1272,11 @@ class ExampleGuideletGuidelet(Guidelet):
     ## self.needleTipToNeedle.SetAndObserveTransformNodeID(self.needleToReference.GetID())
     ## self.needleModel.SetAndObserveTransformNodeID(self.needleTipToNeedle.GetID())
 
-    # Load airwayZone segmentation
-    airwayZoneSegmentationNode = slicer.util.loadSegmentation(DEFAULT_AIRWAYZONE_SEGMENTATION)
-    self.parameterNode.SetParameter('airwayZoneSegmentationNodeID', airwayZoneSegmentationNode.GetID())
     # Set "Extra" as default leaf node for processing
     self.parameterNode.SetParameter('leafTransformNodeID', self.ExtraTransform.GetID()) 
+    self.leafTransformNodeSelector.setCurrentNodeID(self.ExtraTransform.GetID())
+    self.sceneLeafTransformNode = self.ExtraTransform
+    
     return
 
   def recordingCommandCompleted(self, command, q):
