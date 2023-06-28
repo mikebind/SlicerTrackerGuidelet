@@ -963,8 +963,8 @@ class ExampleGuideletGuidelet(Guidelet):
      self.parameterNode.SetParameter('experienceLevelComboBoxCurrentString', self.experienceLevelComboBox.currentText)
      self.parameterNode.SetParameter('roleComboBoxCurrentIndex', str(self.roleComboBox.currentIndex))
      self.parameterNode.SetParameter('roleComboBoxCurrentText', self.roleComboBox.currentText)
-     self.parameterNode.SetParameter('airwayZoneSegmentationNodeID', self.airwayZoneSegmentationNodeSelector.currentNodeID)
-     self.parameterNode.SetParameter('leafTransformNodeID', self.leafTransformNodeSelector.currentNodeID)
+     self.parameterNode.SetNodeReferenceID('airwayZoneSegmentationNode', self.airwayZoneSegmentationNodeSelector.currentNodeID)
+     self.parameterNode.SetNodeReferenceID('sceneLeafTransformNode', self.leafTransformNodeSelector.currentNodeID)
 
   def updateGuideletGUIFromParameterNode(self, caller=None, event=None):
      """ Update Guidelet GUI elements from parameter values"""
@@ -979,8 +979,8 @@ class ExampleGuideletGuidelet(Guidelet):
      # Role
      self.roleComboBox.setCurrentIndex(int(self.parameterNode.GetParameter('roleComboBoxCurrentIndex')))
      # AirwayZone Segmentation
-     self.airwayZoneSegmentationNodeSelector.setCurrentNodeID(self.parameterNode.GetParameter('airwayZoneSegmentationNodeID'))
-     self.leafTransformNodeSelector.setCurrentNodeID(self.parameterNode.GetParameter('leafTransformNodeID'))
+     self.airwayZoneSegmentationNodeSelector.setCurrentNodeID(self.parameterNode.GetNodeReferenceID('airwayZoneSegmentationNode'))
+     self.leafTransformNodeSelector.setCurrentNodeID(self.parameterNode.GetNodeReferenceID('sceneLeafTransformNode'))
      # List of runs
      # List of expert runs
      # NOTE: Parameter node settings related to the Advanced panel are handled in Guidelet.py
@@ -1129,9 +1129,26 @@ class ExampleGuideletGuidelet(Guidelet):
         self.plusRemoteLogic.StopRecording(self.plusRemoteNode)
         # Add the new recording to the current session
         recordingsDirectory = self.parameterNode.GetParameter('PlusAppDataDirectory')
-        newRecording = Recording(self.currentSession, os.path.join(recordingsDirectory, self.recordingFileName))
+        recordingFileFullPath = os.path.normpath(os.path.join(recordingsDirectory, self.recordingFileName)).replace('\\','/')
+        newRecording = Recording(self.currentSession, recordingFileFullPath)
         self.currentSession.addRecording(newRecording)
-        newRecording.processRecordingToScopeRuns(self.sceneLeafTransformNode, self.airwayZoneSegmentationNode, 'airwayZone')
+        leafTransformNode = self.parameterNode.GetNodeReference('sceneLeafTransformNode')
+        airwayZoneSegmentationNode = self.parameterNode.GetNodeReference('airwayZoneSegmentationNode')
+        # NOTE: running into a bug here where the recording file is not yet available when processing
+        # tries to access it. Need to delay if file is not yet available
+        max_attempts = 10
+        attempt_count = 1
+        while not os.path.exists(recordingFileFullPath):
+          time.sleep(0.1)
+          attempt_count += 1
+          if attempt_count > max_attempts:
+            break
+        if not os.path.exists(recordingFileFullPath):
+          raise(Exception(f'Tried and failed {attempt_count} attempts to access {recordingFileFullPath}!'))   
+        else: 
+          logging.debug(f'Success on attempt {attempt_count} to access {recordingFileFullPath}!')
+        # Process the recording now that the file is available
+        newRecording.processRecordingToScopeRuns(leafTransformNode, airwayZoneSegmentationNode, 'airwayZone')
 
 
         # Add the current run to the current dropdown list of RunsData. TODO!
@@ -1198,9 +1215,9 @@ class ExampleGuideletGuidelet(Guidelet):
 
     # Load airwayZone segmentation
     airwayZoneSegmentationNode = slicer.util.loadSegmentation(DEFAULT_AIRWAYZONE_SEGMENTATION)
-    self.parameterNode.SetParameter('airwayZoneSegmentationNodeID', airwayZoneSegmentationNode.GetID())
+    self.parameterNode.SetNodeReferenceID('airwayZoneSegmentationNode', airwayZoneSegmentationNode.GetID())
     self.airwayZoneSegmentationNodeSelector.setCurrentNodeID(airwayZoneSegmentationNode.GetID())
-    
+    # loading segmentation here also buys some more time for the transforms to get fully loaded into the scene
 
     # Use PegNeckHead?
     usingPegNeckHead = True
@@ -1273,9 +1290,9 @@ class ExampleGuideletGuidelet(Guidelet):
     ## self.needleModel.SetAndObserveTransformNodeID(self.needleTipToNeedle.GetID())
 
     # Set "Extra" as default leaf node for processing
-    self.parameterNode.SetParameter('leafTransformNodeID', self.ExtraTransform.GetID()) 
+    self.parameterNode.SetNodeReferenceID('sceneLeafTransformNode', self.ExtraTransform.GetID()) 
     self.leafTransformNodeSelector.setCurrentNodeID(self.ExtraTransform.GetID())
-    self.sceneLeafTransformNode = self.ExtraTransform
+    
     
     return
 
