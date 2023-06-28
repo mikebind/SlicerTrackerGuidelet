@@ -1063,6 +1063,7 @@ class ExampleGuideletGuidelet(Guidelet):
     threeDWidget = layoutManager.threeDWidget(0)
     threeDView = threeDWidget.threeDView()
     threeDView.resetFocalPoint()
+    threeDView.rotateToViewAxis(4) # also rotate so looking at face for RigidNeck model
 
   def recordingCommandCompleted(self, command, q):
     """ lifted from AirwayTrackerClass.py """
