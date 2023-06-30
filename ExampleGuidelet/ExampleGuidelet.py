@@ -99,9 +99,14 @@ SCOPE_SENSOR_TRANSFORM_POSITION_IN_HIERARCHY = 2
 DEFAULT_LEAF_TRANSFORM_NODE_NAME = 'Extra'
 moduleDir = os.path.dirname(__file__)
 PEGNECK_AIRWAYZONE_SEGMENTATION = os.path.join(moduleDir, "Resources","Segmentations", "airwayZoneSegmentation.seg.nrrd")
+
 RIGIDNECK_AIRWAYZONE_SEGMENTATION = os.path.join(moduleDir, "Resources", "Segmentations", "RigidNeckAirwaySegmentation.seg.nrrd")
 RIGIDNECK_STL = os.path.join(moduleDir, "Resources", "Segmentations", "SolidOuter_Cropped.stl")
 
+SUPINE_AIRWAYZONE_SEGMENTATION = os.path.join(moduleDir, "Resources", "Segmentations", "SupineScanSegmentation.seg.nrrd")
+SUPINE_STL = os.path.join(moduleDir, "Resources", "Segmentations", "SupineSinusModel.vtk")
+SUPINE_IMAGE = os.path.join(moduleDir, "Resources", "Segmentations", "SupineCroppedImage.nrrd")
+                          
 class ExampleGuideletLogic(GuideletLogic):
   """Uses GuideletLogic base class, available at:
   """ #TODO add path
@@ -109,6 +114,24 @@ class ExampleGuideletLogic(GuideletLogic):
 
   def __init__(self, parent = None):
     GuideletLogic.__init__(self, parent)
+
+  def centerSlicesOnTransformedPoint(self, leafNode):
+    # Jump all slices to the origin point of a given transform node (taking into account all parent transforms)
+    m = vtk.vtkMatrix4x4()
+    leafNode.GetMatrixTransformBetweenNodes(leafNode, None, m)
+    position_RAS = [m.GetElement(0,3), m.GetElement(1,3), m.GetElement(2,3)] # same as multiplying matrix by [0,0,0,1]
+    slicer.vtkMRMLSliceNode.JumpAllSlices(slicer.mrmlScene, *position_RAS, slicer.vtkMRMLSliceNode.CenteredJumpSlice)
+
+  def startLiveUpdate(self, leafTransformNode):
+    callback = lambda unused1, unused2: self.centerSlicesOnTransformedPoint(leafTransformNode) #unused inputs are caller and event arguments to event callbacks
+    self.liveUpdateCallbackID = leafTransformNode.AddObserver(slicer.vtkMRMLTransformNode.TransformModifiedEvent, callback)
+    self.liveUpdateLeafNode = leafTransformNode
+    # callback ID and leaf node are stored so that stopLiveUpdate can run without any inputs and still properly stop the live update
+    return self.liveUpdateCallbackID
+
+  def stopLiveUpdate(self):
+     self.liveUpdateLeafNode.RemoveObserver(self.liveUpdateCallbackID)
+     # TODO: make this robust to errors like calling startLiveUpdate twice before calling stopLiveUpdate
 
   def displayScopeRun(self, scopeRunToDisplay):
     logging.debug('ExampleGuideletLogic.displayScopeRun()')
@@ -756,10 +779,36 @@ class ExampleGuideletGuidelet(Guidelet):
     self.experienceLevelComboBox.connect('currentIndexChanged(int)', self.updateParameterNodeFromGuideletGUI)
     self.saveUserInfoButton.connect('clicked(bool)', self.saveUserInfoButtonClicked)
     self.displaySelectedRunButton.connect('clicked(bool)', self.onDisplaySelectedRunClicked)
+    self.liveUpdateCheckBox.connect('toggled(bool)', self.onLiveUpdateCheckBoxToggled)
 
     #self.calibrationCollapsibleButton.connect('toggled(bool)', self.onPatientSetupPanelToggled)
     #self.exampleButton.connect('clicked(bool)', self.onExampleButtonClicked)
     # TODO: Ensure disconnect() has all matching disconnections
+
+  def onLiveUpdateCheckBoxToggled(self, bool):
+    """ Toggle whether live updating is occuring
+    """
+    if self.liveUpdateCheckBox.checked:
+      self.selectView(self.VIEW_4UP)
+      self.showSliceIntersctions(True)
+      leafTransformNode = self.parameterNode.GetNodeReference('sceneLeafTransformNode')
+      self.liveUpdateObserverId = self.logic.startLiveUpdate(leafTransformNode)
+    else:
+      self.logic.stopLiveUpdate()
+       
+
+  def showSliceIntersctions(self, bool):
+    if bool:
+      visiblity = 1
+    else: 
+      visiblity = 0
+    sliceDisplayNodes = slicer.util.getNodesByClass("vtkMRMLSliceDisplayNode")
+    for sliceDisplayNode in sliceDisplayNodes:
+      sliceDisplayNode.SetIntersectingSlicesVisibility(visiblity)
+    # Workaround to force visual update (see https://github.com/Slicer/Slicer/issues/6338)
+    sliceNodes = slicer.util.getNodesByClass('vtkMRMLSliceNode')
+    for sliceNode in sliceNodes:
+      sliceNode.Modified()
 
   def onDisplaySelectedRunClicked(self):
     """Display the currently selected run in the 3D view """
@@ -932,15 +981,23 @@ class ExampleGuideletGuidelet(Guidelet):
     slicer.app.processEvents() 
 
     # Which phantom??
+    usingSupineRigid = True
     usingPegNeckHead = False
-    usingScannedRigidNeckHead = True # TODO: make this switchable as a configuration
+    usingScannedRigidNeckHead = False # TODO: make this switchable as a configuration
     if usingPegNeckHead:
-       AIRWAYZONE_SEGMENTATION = PEGNECK_AIRWAYZONE_SEGMENTATION
+      AIRWAYZONE_SEGMENTATION = PEGNECK_AIRWAYZONE_SEGMENTATION
     elif usingScannedRigidNeckHead:
-       AIRWAYZONE_SEGMENTATION = RIGIDNECK_AIRWAYZONE_SEGMENTATION
-       # Load matching STL
-       outerModelNode = slicer.util.loadModel(RIGIDNECK_STL)
-       outerModelNode.GetDisplayNode().SetOpacity(0.1)
+      AIRWAYZONE_SEGMENTATION = RIGIDNECK_AIRWAYZONE_SEGMENTATION
+      # Load matching STL
+      outerModelNode = slicer.util.loadModel(RIGIDNECK_STL)
+      outerModelNode.GetDisplayNode().SetOpacity(0.1)
+    elif usingSupineRigid:
+      AIRWAYZONE_SEGMENTATION = SUPINE_AIRWAYZONE_SEGMENTATION
+      # Load matching surface
+      outerModelNode = slicer.util.loadModel(SUPINE_STL)
+      outerModelNode.GetDisplayNode().SetOpacity(0.1)
+      # Load matching image
+      imageNode = slicer.util.loadVolume(SUPINE_IMAGE)
        
     # Load airwayZone segmentation
     airwayZoneSegmentationNode = slicer.util.loadSegmentation(AIRWAYZONE_SEGMENTATION)
@@ -985,6 +1042,8 @@ class ExampleGuideletGuidelet(Guidelet):
       self.HeadSensorToHeadSTL = slicer.util.getNode('HeadSensorToNewPegHe')
     elif usingScannedRigidNeckHead:
       self.HeadSensorToHeadSTL = slicer.util.getNode('HeadSensorToRigidHea')
+    elif usingSupineRigid:
+      self.HeadSensorToHeadSTL = slicer.util.getNode('HeadSensorToScan2STL')
     else:
       self.HeadSensorToHeadSTL = slicer.util.getNode('HeadSensorToHeadSTL')
     try:
@@ -1063,7 +1122,7 @@ class ExampleGuideletGuidelet(Guidelet):
     threeDWidget = layoutManager.threeDWidget(0)
     threeDView = threeDWidget.threeDView()
     threeDView.resetFocalPoint()
-    threeDView.rotateToViewAxis(4) # also rotate so looking at face for RigidNeck model
+    #threeDView.rotateToViewAxis(4) # also rotate so looking at face for RigidNeck model
 
   def recordingCommandCompleted(self, command, q):
     """ lifted from AirwayTrackerClass.py """
@@ -1091,7 +1150,8 @@ class ExampleGuideletGuidelet(Guidelet):
     self.roleComboBox.disconnect('currentIndexChanged(int)', self.updateParameterNodeFromGuideletGUI)
     self.experienceLevelComboBox.disconnect('currentIndexChanged(int)', self.updateParameterNodeFromGuideletGUI)
     self.saveUserInfoButton.disconnect('clicked(bool)', self.saveUserInfoButtonClicked)
-    self.displaySelectedRunButton.codisconnectnnect('clicked(bool)', self.onDisplaySelectedRunClicked)
+    self.displaySelectedRunButton.disconnect('clicked(bool)', self.onDisplaySelectedRunClicked)
+    self.liveUpdateCheckBox.disconnect('toggled(bool)', self.onLiveUpdateCheckBoxToggled)
 
     
   def patientSetupPanel(self):
@@ -1122,6 +1182,7 @@ class ExampleGuideletGuidelet(Guidelet):
     self.displaySelectedRunButton = loadedUI.DisplaySelectedRunButton
     self.expertRunToCompareLabel = loadedUI.ExpertRunToCompareLabel
     self.runToReviewLabel = loadedUI.RunToReviewLabel
+    self.liveUpdateCheckBox = loadedUI.LiveUpdateCheckBox
 
     #### TEMPORARY CHANGES ####
     self.displaySelectedRunButton.setText('Display Selected Run') # instead of runs

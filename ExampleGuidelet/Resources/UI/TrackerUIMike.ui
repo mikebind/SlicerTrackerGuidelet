@@ -167,6 +167,13 @@
         </property>
        </widget>
       </item>
+      <item>
+       <widget class="ctkCheckBox" name="LiveUpdateCheckBox">
+        <property name="text">
+         <string>Center Slice Views on Scope Tip (may slow recording)</string>
+        </property>
+       </widget>
+      </item>
      </layout>
     </widget>
    </item>
@@ -183,13 +190,6 @@
         </property>
        </widget>
       </item>
-      <item row="1" column="0">
-       <widget class="QLabel" name="ExpertRunToCompareLabel">
-        <property name="text">
-         <string>Select Expert Run To Compare</string>
-        </property>
-       </widget>
-      </item>
       <item row="0" column="1">
        <widget class="ctkComboBox" name="RunToReviewComboBox">
         <item>
@@ -197,6 +197,13 @@
           <string>* no recorded runs yet for this session * </string>
          </property>
         </item>
+       </widget>
+      </item>
+      <item row="1" column="0">
+       <widget class="QLabel" name="ExpertRunToCompareLabel">
+        <property name="text">
+         <string>Select Expert Run To Compare</string>
+        </property>
        </widget>
       </item>
       <item row="1" column="1">
@@ -226,6 +233,11 @@
   </layout>
  </widget>
  <customwidgets>
+  <customwidget>
+   <class>ctkCheckBox</class>
+   <extends>QCheckBox</extends>
+   <header>ctkCheckBox.h</header>
+  </customwidget>
   <customwidget>
    <class>ctkCollapsibleButton</class>
    <extends>QWidget</extends>
