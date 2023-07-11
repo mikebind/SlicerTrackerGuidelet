@@ -1467,6 +1467,14 @@ class ExampleGuideletGuidelet(Guidelet):
         self.displaySelectedRunButton.setText("Display Selected Run")  # instead of runs
         self.expertRunToCompareComboBox.hide()
         self.expertRunToCompareLabel.hide()
+        self.experienceLevelComboBox.hide()
+        loadedUI.label_2.hide() # experience label
+        self.roleComboBox.hide()
+        loadedUI.label_3.hide() # role label
+        self.currentExperienceLevelLabel.hide()
+        self.currentRoleLabel.hide()
+        loadedUI.label_5.hide() # current exp label
+        loadedUI.label_6.hide() # current role label
 
     def onExampleButtonClicked(self, toggled):
         logging.debug("onExampleButtonClicked")
