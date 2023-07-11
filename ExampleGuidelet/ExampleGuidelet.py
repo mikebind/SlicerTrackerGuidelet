@@ -132,6 +132,12 @@ JULY9_OUTERMODEL_STL = os.path.join(
     moduleDir, "Resources", "Segmentations", 
     "July9ScanAirwayZoneSegmentation_OuterSupineSinusModel.stl"
 )
+JULY9_IMAGE = os.path.join(
+    moduleDir, "Resources", "Segmentations", "July9_AxBone11_cropped1mm.nrrd"
+)
+
+
+
 class ExampleGuideletLogic(GuideletLogic):
     """Uses GuideletLogic base class, available at:"""  # TODO add path
 
@@ -1215,6 +1221,8 @@ class ExampleGuideletGuidelet(Guidelet):
             # in so that the outer layer is an uncomplicated reference with a nose
             # and a closed neck.
             outerModelNode.GetDisplayNode().SetOpacity(0.1)
+            # Load matching image
+            imageNode = slicer.util.loadVolume(JULY9_IMAGE)
           
         # Load airwayZone segmentation
         airwayZoneSegmentationNode = slicer.util.loadSegmentation(
