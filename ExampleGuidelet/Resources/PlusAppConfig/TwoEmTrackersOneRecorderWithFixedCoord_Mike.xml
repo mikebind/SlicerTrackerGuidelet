@@ -1,0 +1,185 @@
+<PlusConfiguration version="2.1" PlusRevision="Plus-2.1.2.3381 - Win32">
+  <DataCollection StartupDelaySec="1">
+    <DeviceSet Name="Two EM Sensors One Recorder, incl Fixed CoordSys -Mike" Description="Connect sensor with stylus to sensor bay 1 (port 0) and the sensor attached to the head to sensor bay 2 (port 1). Tracking two EM sensors. This config also sets up one virtual capture device for recording tracking to a file (This file records the tracking for both sensors). Broadcasting tool tracking data through OpenIGTLink." />
+    <Device
+      Id="EmTracker"
+      Type="Ascension3DG"
+      AcquisitionRate="50"
+      LocalTimeOffsetSec="0"
+      FilterAcWideNotch="1"
+      ToolReferenceFrame="EmTracker"
+      FilterAcNarrowNotch="0"
+      FilterDcAdaptive="0"
+      FilterLargeChange="0"
+      FilterAlpha="0">
+      <DataSources>
+        <DataSource Type="Tool" Id="StylusSensor" PortName="0" BufferSize="500" AveragedItemsForFiltering="20" />
+		<DataSource Type="Tool" Id="HeadSensor" PortName="1" BufferSize="500" AveragedItemsForFiltering="20" />
+      </DataSources>
+      <OutputChannels>
+        <OutputChannel Id="EmTrackerStream">
+          <DataSource Id="StylusSensor" />
+		  <DataSource Id="HeadSensor" />
+        </OutputChannel>
+      </OutputChannels>
+    </Device>
+	<Device Id="CaptureDevice" Type="VirtualCapture" BaseFileName="RecordingsTestMike.igs.mha" EnableCapturingOnStart="FALSE" > 
+		<InputChannels>
+			<InputChannel Id="EmTrackerStream" />
+		</InputChannels>
+	</Device>
+  </DataCollection>
+  <PlusOpenIGTLinkServer MaxNumberOfIgtlMessagesToSend="1" MaxTimeSpentWithProcessingMs="50" ListeningPort="18944" SendValidTransformsOnly="true" OutputChannelId="EmTrackerStream">
+    <DefaultClientInfo>
+      <MessageTypes>
+        <Message Type="TRANSFORM" />
+      </MessageTypes>
+      <TransformNames>
+        <Transform Name="StylusSensorToEmTracker" />
+		<Transform Name="EmTrackerToHeadSensor" />
+		<Transform Name="StylusTipToStylusSensor" />
+		<Transform Name="NeedleTipToStylusSensor" />
+	<!--	<Transform Name="HeadSensorToHeadSTL" />
+		<Transform Name="HeadSensorToPegHeadSTL" />
+		<Transform Name="HeadSensorToNewPegHeadSTL" />
+		<Transform Name="HeadSensorToRigidHeadScannedSTL" />
+		<Transform Name="HeadSensorToScan2STL" /> -->
+		<Transform Name="HeadSensorToJuly9Scan" />
+      </TransformNames>
+    </DefaultClientInfo>
+  </PlusOpenIGTLinkServer>
+  <!--
+  The following defines a StylusTipToStylusSensor transformation matrix
+  which is fixed and should be a decent calibration for the stylus object
+  printed on 3/7/2023. It could be updated by re-running the pivot and
+  spin calibration steps in Slicer and copy/pasting the resulting transformation
+  into here.  Error reported is an estimate from memory, updated versions should record the actual error. 
+  -->
+  <CoordinateDefinitions>
+	<!--
+	Newly scanned July 9. Rigid neck with supports for bronchial tree as well.
+	Replace this one with one done at the place for the bootcamp
+	-->
+	<Transform From="HeadSensor" To="July9Scan"
+	Matrix="0.0820919 0.996621 -0.00270378 -3.00373 
+	0.888476 -0.0744125 -0.452851 92.1835 
+	-0.451522 0.0347731 -0.891582 -129.086 
+	0 0 0 1 "
+	Error="1.6" Date="2023.07.10" />
+	<!--
+	Newly scanned on 6/29/2023. Rigid neck head with supports to reduce airway motion.  Note that bronchial tree still sags significantly relative to the 
+	scanned version (which was laid supine)
+	-->
+	<Transform From="HeadSensor" To="Scan2STL"
+	Matrix="0.0638192 0.99787 0.0135439 -3.78825 
+	0.80578 -0.0435178 -0.590613 74.1121 
+	-0.588766 0.0486059 -0.806841 169.532 
+	0 0 0 1 "
+	Error="2.3" Date="2023.06.29" />
+
+	<!--   
+	The following defines a StylusTipToStylusSensor transformation matrix which is fixed and should be a decent calibration for the stylus object printed on 3/7/2023. It could be updated by re-running the pivot and spin calibration steps in Slicer and copy/pasting the resulting transformation into here.  Error reported is an estimate from memory, updated versions should record the actual error. 
+	-->
+	<!--
+	Previous version of transform matrix:
+     <Transform From="StylusTip" To="StylusSensor"
+      Matrix="0.0113631 -0.0342283 0.999349 71.5634 
+	  0.999935 5.42101e-20 -0.0113697 -0.814186 
+	  0.000389166 0.999414 0.0342261 2.45093 
+	  0 0 0 1 "
+       Error="0.9" Date="2023.03.08" />
+	-->
+	 <Transform From="StylusTip" To="StylusSensor"
+	  Matrix="-0.0352898 -0.00115823 0.999376 70.5608 
+      -0.999377 0 -0.0352898 0.0434718 
+      4.08738e-05 -0.999999 -0.00115751 -0.302784 
+      0 0 0 1 "
+	  Error="0.39" Date="2023.05.31" />
+
+	<!--
+	We should be able to define another fixed transform between the printed head STL and the head sensor, since that is locked in place. Error is perhaps approximately the sum of the error of the StylusTipToStylusSensor transform and the EmTrackerToRas transform.  OLDER VERSION!! 
+	
+	<Transform From="HeadSensor" To="HeadSTL"
+	Matrix="-0.99379 0.0683244 0.0877919 -8.42089 
+	0.095049 0.11074 0.989323 -105.374 
+	0.0577811 0.991427 -0.11651 -48.0826 
+	0 0 0 1 "
+	Error="1.5" Date="2023.03.08"
+	/>
+	-->
+	<!--
+	Newer version based on the STL with the neck with pegs. Note that there
+	is a fair amount of slop in this version and it should definitely be 
+	updated if there is a rigid version printed. This matrix is found via
+	Fiducial Registration Wizard with Calibration points collected via StylusTipToStylusSensor (or NeedleTipToStylusSensor) under StylusSensorToEmTracker under EmTrackerToHeadSensor. Error uncertain 
+	again.
+	
+	<Transform From="HeadSensor" To="HeadSTL"
+	Matrix="0.00942954 0.99992 0.00847671 -6.67881 
+	0.984845 -0.0107548 0.173101 84.0051 
+	0.173178 0.00671599 -0.984868 97.4065 
+	0 0 0 1 "
+	Error="1.5" Date="2023.03.08"
+	/>
+	-->
+	<!--
+	For Rigid Sinus and Peg-neck Head STL:
+	-->
+	<Transform From="HeadSensor" To="PegHeadSTL"
+	Matrix="-0.0348925 0.999287 -0.0144381 -13.1255 
+	-0.131355 -0.0189072 -0.991155 289.538 
+	-0.990721 -0.0326873 0.131921 1210.81 
+	0 0 0 1 "
+	Error="1.57" Date="2023.06.15"
+	/>
+	<!-- 
+	Using a nose and carina point (increased error but better alignment)
+	-->
+	<Transform From="HeadSensor" To="NewPegHeadSTL"
+	Matrix="-0.00943448 0.998739 -0.0493138 -11.4479 
+	-0.131186 -0.050126 -0.99009 291.014 
+	-0.991313 -0.00287169 0.131494 1212.12 
+	0 0 0 1 "
+	Error="2.4" Date="2023.06.15"
+	/>
+	<!--
+	Rigid neck version of head/torso to be used for training event.
+	Head sensor location has moved again.  Repeated calibrations had
+	errors approx 1.3-2.0 mm.  
+	-->
+	<Transform From="HeadSensor" To="HeadSTL"
+	Matrix="0.0517723 0.997298 0.0521109 -7.55487 
+    0.815128 -0.0120533 -0.579156 63.5214 
+    -0.576963 0.0724613 -0.81355 18.1011 
+    0 0 0 1 "
+	Error="1.35" Date="2023.05.31"
+	/>
+	<!--
+	Rigid neck version of head/torso that was scanned to ACTUALLY be used for training event.	  
+	-->
+	<Transform From="HeadSensor" To="RigidHeadScannedSTL"
+	Matrix="0.0776831 0.996816 0.0180033 4.84056 
+	-0.607057 0.0616177 -0.792266 198.816 
+	-0.790852 0.0506166 0.609911 84.4788 
+	0 0 0 1 "
+	Error="2.08" Date="2023.06.28"
+	/>
+
+	<!--
+	The EM sensor coordinate systems have the y axis as the one sticking out
+	the end of the wire, but the needle models have the z axis as the one 
+	that the shaft of the needle runs along.  For convenience, we should
+	reorient the sensor to the model. We can do this by cycling the axes:
+    x to y, y to z, and z to x. This appears to put the sensor location at 
+	at the center of the ball at the tip of the needle.  A z translation of 
+	-1.0 to 1.5 mm may do a better job of putting it at the tip of the ball.  
+	-->
+	<Transform From="NeedleTip" To="StylusSensor"
+	 Matrix="0 0 1 0
+	 1 0 0 0
+	 0 1 0 0
+	 0 0 0 1 "
+	 Error="0" Date="2023.05.02"
+	 />
+  </CoordinateDefinitions>
+</PlusConfiguration>
