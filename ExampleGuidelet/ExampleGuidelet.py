@@ -125,8 +125,13 @@ SUPINE_STL = os.path.join(
 SUPINE_IMAGE = os.path.join(
     moduleDir, "Resources", "Segmentations", "SupineCroppedImage.nrrd"
 )
-
-
+JULY9_AIRWAYZONE_SEGMENTATION = os.path.join( 
+    moduleDir, "Resources", "Segmentations", "July9ScanAirwayZoneSegmentation.seg.nrrd"
+)
+JULY9_OUTERMODEL_STL = os.path.join(
+    moduleDir, "Resources", "Segmentations", 
+    "July9ScanAirwayZoneSegmentation_OuterSupineSinusModel.stl"
+)
 class ExampleGuideletLogic(GuideletLogic):
     """Uses GuideletLogic base class, available at:"""  # TODO add path
 
@@ -1204,10 +1209,13 @@ class ExampleGuideletGuidelet(Guidelet):
             imageNode = slicer.util.loadVolume(SUPINE_IMAGE)
         elif usingJuly9Scan:
             AIRWAYZONE_SEGMENTATION = JULY9_AIRWAYZONE_SEGMENTATION
-            # Load matching STL?
-            # Same as SupineRigid_STL, but would need to be registered
-            # Also, the nose was cut off
-
+            # Load matching surface?
+            outerModelNode = slicer.util.loadModel(JULY9_OUTERMODEL_STL)
+            # Came from SupineRigid_STL, but manually registered, and then filled 
+            # in so that the outer layer is an uncomplicated reference with a nose
+            # and a closed neck.
+            outerModelNode.GetDisplayNode().SetOpacity(0.1)
+          
         # Load airwayZone segmentation
         airwayZoneSegmentationNode = slicer.util.loadSegmentation(
             AIRWAYZONE_SEGMENTATION
