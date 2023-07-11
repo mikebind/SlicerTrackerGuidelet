@@ -2,6 +2,7 @@ import logging
 import os
 import time
 import numpy as np
+import json
 import re
 import slicer, vtk
 
@@ -29,7 +30,7 @@ class Session(object):
 
     def getSaveFileText(self):
         logging.debug('Session.getSaveFileText()')
-        headerTextList = [val for val in self.userDataDict.values()]
+        headerTextList = [self.userDataDict['userName']]#NOTE: used to be [val for val in self.userDataDict.values()]
         delimLine = "---" # delimiter line separating header from the rest
         sections = []
         sections.extend(headerTextList)
@@ -39,6 +40,7 @@ class Session(object):
             # Record file path and then scope run data
             recObjFilePath = recObj.recordingFilePath
             section.append(recObjFilePath)
+            section.append(recObj.getTransformsInfoString())
             section.append(delimLine)
             for scopeRun in recObj.listOfScopeRuns:
                 scopeRunText = scopeRun.getSaveDataText()
@@ -89,13 +91,22 @@ class Recording(object):
         self.parentSession = parentSessionObject
         self.recordingFilePath = recordingFilePath # should include full path and file name
         self.listOfScopeRuns = listOfScopeRuns
+        self.transformsNames = None
+        self.transformsList = None
 
     def processRecordingToScopeRuns(self, sceneLeafTransformNode, segmentationNode, airwayZoneSegmentName='airwayZone'):
         logging.debug('Recording.processRecordingToScopeRuns()')
+        self.transformsList, self.transformsNames = gatherTransformsFromTransformHierarchy(leafTransformNode=sceneLeafTransformNode)
         scopeRuns = Recording.processRecordingFileToScopeRuns(self.recordingFilePath, sceneLeafTransformNode, segmentationNode, airwayZoneSegmentName)
         for scopeRun in scopeRuns:
             scopeRun.setParentRecordingObject(self)
         self.listOfScopeRuns = scopeRuns
+
+    def getTransformsInfoString(self):
+        transform_names_str = json.dumps(self.transformsNames)
+        transform_arrays_str = json.dumps([t.tolist() for t in self.transformsList])
+        transformsInfoString = "\n".join([transform_names_str, transform_arrays_str])
+        return transformsInfoString
 
     @classmethod 
     def processRecordingFileToScopeRuns(cls, recordingFilePath, sceneLeafTransformNode, segmentationNode, airwayZoneSegmentName='airwayZone'):
@@ -197,19 +208,25 @@ class ScopeRun(object):
 
     def getSaveDataText(self):
         # organize data into saveable text format
+        # Concatenate matrices to a 7-col array with timstamps, then positions, then orientations
+        arr = np.concatenate((self.timeStamps.reshape(len(self.timeStamps),1),self.positions, self.orientations),axis=1)
+        header_string = 'JSON formatted list of run data. [timeStamp, pos_R, pos_A, pos_S, ori_R, ori_A, ori_S]'
+        array_json = json.dumps(arr.tolist())
+        saveDataText = "\n".join([header_string, array_json])
+
         # TODO make this a better format (csv?)
-        sections = []
-        sections.append('\nPostions:')
-        positions_string = np.array2string(self.positions)
-        sections.append(positions_string)
-        sections.append('\nOrientations:')
-        ori_string = np.array2string(self.orientations)
-        sections.append(ori_string)
-        sections.append('\nTimeStamps:')
-        timeStampsCol = self.timeStamps.reshape((len(self.timeStamps), 1)) # reformat to one number per column
-        tstamp_string = np.array2string(timeStampsCol)
-        sections.append(tstamp_string)
-        saveDataText = "\n".join(sections)
+        # sections = []
+        # sections.append('\nPostions:')
+        # positions_string = np.array2string(self.positions)
+        # sections.append(positions_string)
+        # sections.append('\nOrientations:')
+        # ori_string = np.array2string(self.orientations)
+        # sections.append(ori_string)
+        # sections.append('\nTimeStamps:')
+        # timeStampsCol = self.timeStamps.reshape((len(self.timeStamps), 1)) # reformat to one number per column
+        # tstamp_string = np.array2string(timeStampsCol)
+        # sections.append(tstamp_string)
+        # saveDataText = "\n".join(sections)
         return saveDataText
 
     def saveToFile(self, saveDir):
