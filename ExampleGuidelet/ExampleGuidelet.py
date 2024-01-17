@@ -1,5 +1,8 @@
 import os
-from __main__ import vtk, qt, ctk, slicer
+
+# from __main__ import vtk, qt, ctk, slicer
+import slicer, vtk, qt, ctk
+from slicer import util
 
 from SlicerGuideletBase import (
     GuideletLoadable,
@@ -11,7 +14,10 @@ from SlicerGuideletBase import Guidelet
 import logging
 import time
 import numpy as np
+import Lib.HelperClasses  # allows access to methods outside of the classes
 from Lib.HelperClasses import Session, Recording, ScopeRun
+
+# Lib.HelperClasses.loadOnlyScopeRunsFromSessionFile()
 
 
 class ExampleGuidelet(GuideletLoadable):
@@ -90,6 +96,7 @@ class ExampleGuideletWidget(GuideletWidget):
                 self.plusRemoteNode.SetCurrentCaptureID(self.captureDeviceName)
                 self.plusRemoteNode.SetRecordingFilename(self.recordingFileName)
                 self.plusRemoteLogic.StartRecording(self.plusRemoteNode)
+                slicer.app.processEvents()
 
         else:
             self.startStopRecordingButton.setText("  Start Recording")
@@ -99,6 +106,7 @@ class ExampleGuideletWidget(GuideletWidget):
                 logging.info("Stopping recording")
                 self.plusRemoteNode.SetCurrentCaptureID(self.captureDeviceName)
                 self.plusRemoteLogic.StopRecording(self.plusRemoteNode)
+                slicer.app.processEvents()
 
 
 HEAD_SENSOR_TRANSFORM_POSITION_IN_HIERARCHY = 1
@@ -125,17 +133,18 @@ SUPINE_STL = os.path.join(
 SUPINE_IMAGE = os.path.join(
     moduleDir, "Resources", "Segmentations", "SupineCroppedImage.nrrd"
 )
-JULY9_AIRWAYZONE_SEGMENTATION = os.path.join( 
+JULY9_AIRWAYZONE_SEGMENTATION = os.path.join(
     moduleDir, "Resources", "Segmentations", "July9ScanAirwayZoneSegmentation.seg.nrrd"
 )
 JULY9_OUTERMODEL_STL = os.path.join(
-    moduleDir, "Resources", "Segmentations", 
-    "July9ScanAirwayZoneSegmentation_OuterSupineSinusModel.stl"
+    moduleDir,
+    "Resources",
+    "Segmentations",
+    "July9ScanAirwayZoneSegmentation_OuterSupineSinusModel.stl",
 )
 JULY9_IMAGE = os.path.join(
     moduleDir, "Resources", "Segmentations", "July9_AxBone11_cropped1mm.nrrd"
 )
-
 
 
 class ExampleGuideletLogic(GuideletLogic):
@@ -1141,13 +1150,13 @@ class ExampleGuideletGuidelet(Guidelet):
         logging.debug("ExampleGuideletGuidelet.setupScene")
 
         """
-    ReferenceToRas transform is used in almost all IGT applications. Reference is the coordinate system
-    of a tool fixed to the patient. Tools are tracked relative to Reference, to compensate for patient
-    motion. ReferenceToRas makes sure that everything is displayed in an anatomical coordinate system, i.e.
-    R, A, and S (Right, Anterior, and Superior) directions in Slicer are correct relative to any
-    images or tracked tools displayed.
-    ReferenceToRas is needed for initialization, so we need to set it up before calling Guidelet.setupScene().
-    """
+        ReferenceToRas transform is used in almost all IGT applications. Reference is the coordinate system
+        of a tool fixed to the patient. Tools are tracked relative to Reference, to compensate for patient
+        motion. ReferenceToRas makes sure that everything is displayed in an anatomical coordinate system, i.e.
+        R, A, and S (Right, Anterior, and Superior) directions in Slicer are correct relative to any
+        images or tracked tools displayed.
+        ReferenceToRas is needed for initialization, so we need to set it up before calling Guidelet.setupScene().
+        """
 
         try:
             self.referenceToRas = slicer.util.getNode("EmTrackerToHeadSenso")
@@ -1217,13 +1226,13 @@ class ExampleGuideletGuidelet(Guidelet):
             AIRWAYZONE_SEGMENTATION = JULY9_AIRWAYZONE_SEGMENTATION
             # Load matching surface?
             outerModelNode = slicer.util.loadModel(JULY9_OUTERMODEL_STL)
-            # Came from SupineRigid_STL, but manually registered, and then filled 
+            # Came from SupineRigid_STL, but manually registered, and then filled
             # in so that the outer layer is an uncomplicated reference with a nose
             # and a closed neck.
             outerModelNode.GetDisplayNode().SetOpacity(0.1)
             # Load matching image
             imageNode = slicer.util.loadVolume(JULY9_IMAGE)
-          
+
         # Load airwayZone segmentation
         airwayZoneSegmentationNode = slicer.util.loadSegmentation(
             AIRWAYZONE_SEGMENTATION
@@ -1468,13 +1477,13 @@ class ExampleGuideletGuidelet(Guidelet):
         self.expertRunToCompareComboBox.hide()
         self.expertRunToCompareLabel.hide()
         self.experienceLevelComboBox.hide()
-        loadedUI.label_2.hide() # experience label
+        loadedUI.label_2.hide()  # experience label
         self.roleComboBox.hide()
-        loadedUI.label_3.hide() # role label
+        loadedUI.label_3.hide()  # role label
         self.currentExperienceLevelLabel.hide()
         self.currentRoleLabel.hide()
-        loadedUI.label_5.hide() # current exp label
-        loadedUI.label_6.hide() # current role label
+        loadedUI.label_5.hide()  # current exp label
+        loadedUI.label_6.hide()  # current role label
 
     def onExampleButtonClicked(self, toggled):
         logging.debug("onExampleButtonClicked")
