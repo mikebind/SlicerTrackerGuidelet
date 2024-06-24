@@ -146,6 +146,22 @@ JULY9_IMAGE = os.path.join(
     moduleDir, "Resources", "Segmentations", "July9_AxBone11_cropped1mm.nrrd"
 )
 
+AIRWAY_PRACTICE_2024_AIRWAYZONE_SEGMENTATION = os.path.join(
+    moduleDir, "Resources", "Segmentations", "SoundsSegmentation.seg.nrrd"
+)
+AIRWAY_PRACTICE_2024_IMAGE = os.path.join(
+    moduleDir,
+    "Resources",
+    "Segmentations",
+    "AIRWAY TESTING_Silicone Nose_PracticeModel_Scan.nrrd",
+)
+AIRWAY_PRACTICE_2024_OUTERMODEL_STL = os.path.join(
+    moduleDir,
+    "Resources",
+    "Segmentations",
+    "AIRWAY TESTING_Silicone Nose_Practice Model_001_1.stl",
+)
+
 
 class ExampleGuideletLogic(GuideletLogic):
     """Uses GuideletLogic base class, available at:"""  # TODO add path
@@ -264,12 +280,12 @@ class ExampleGuideletLogic(GuideletLogic):
         # TODO: Verify that transformNames[1] looks like it's the dynamic head sensor and [2] looks like the dynamic scope sensor
         # Replace the single transform matrix arrays in transformsList with the full set from
         # the loaded file for both the head sensor and scope sensor
-        transformsList[
-            HEAD_SENSOR_TRANSFORM_POSITION_IN_HIERARCHY
-        ] = headSensorTransforms
-        transformsList[
-            SCOPE_SENSOR_TRANSFORM_POSITION_IN_HIERARCHY
-        ] = scopeSensorTransforms
+        transformsList[HEAD_SENSOR_TRANSFORM_POSITION_IN_HIERARCHY] = (
+            headSensorTransforms
+        )
+        transformsList[SCOPE_SENSOR_TRANSFORM_POSITION_IN_HIERARCHY] = (
+            scopeSensorTransforms
+        )
         # Get sequence of locations in RAS space
         positions, orientations = self.positions_from_transform_hierarchy(
             transformsList
@@ -1232,6 +1248,9 @@ class ExampleGuideletGuidelet(Guidelet):
             outerModelNode.GetDisplayNode().SetOpacity(0.1)
             # Load matching image
             imageNode = slicer.util.loadVolume(JULY9_IMAGE)
+        elif using2024PracticeScan:
+            #
+            imageNode = slicer.util.loadVolume(AIRWAY_PRACTICE_2024_IMAGE)
 
         # Load airwayZone segmentation
         airwayZoneSegmentationNode = slicer.util.loadSegmentation(
