@@ -25,12 +25,14 @@ class ExampleGuidelet(GuideletLoadable):
 
     def __init__(self, parent):
         GuideletLoadable.__init__(self, parent)
-        self.parent.title = "ExampleGuidelet"
-        self.parent.categories = ["Examples"]
+        self.parent.title = "AirwayScopeTrainerGuidelet"
+        self.parent.categories = ["MikeTools"]
         self.parent.dependencies = []
-        self.parent.contributors = ["YOUR NAME"]
-        self.parent.helpText = """ SOME HELP AND A LINK TO YOUR WEBSITE """
-        self.parent.acknowledgementText = """ THANKS TO ... """
+        self.parent.contributors = ["Mike Bindschadler"]
+        self.parent.helpText = """ Simple Guidelet based on template and used for a trainer for airway flexible endoscopy """
+        self.parent.acknowledgementText = (
+            """ Supported by Seattle Children's Hospital """
+        )
 
 
 class ExampleGuideletWidget(GuideletWidget):
@@ -64,11 +66,17 @@ class ExampleGuideletWidget(GuideletWidget):
         pass
 
     def createGuideletInstance(self):
+        """Override of abstract method in GuideletLoadable, called from
+        onLaunchGuideletButtonClicked()
+        """
         return ExampleGuideletGuidelet(
             None, self.guideletLogic, self.selectedConfigurationName
         )
 
     def createGuideletLogic(self):
+        """Override of abstract method in GuideletLoadable, called from
+        GuideletWidget.__init__()
+        """
         return ExampleGuideletLogic()
 
     def onStartStopRecordingClicked(self):
@@ -207,213 +215,6 @@ class ExampleGuideletLogic(GuideletLogic):
         logging.debug("ExampleGuideletLogic.hideScopeRun()")
         scopeRunToDisplay.hideModelNodes()
 
-    def createSessionFile(self, headerList, currentSessionFilePath):
-        raise (
-            Exception(
-                "ExampleGuidelet.createSessionFile() accessed, but functionality moved to Session objects!"
-            )
-        )
-        """Create a file to hold the results of a session for a single user.  This should be
-    called whenever new user information is saved.  Whenever recordings are started/finished,
-    a line should be added to the session file saying where the file is saved and what the 
-    file name is."""
-        lines = [*headerList, "---"]  # add a '---' line as a delimiter
-        with open(currentSessionFilePath, "w") as f:
-            f.writelines(f"{line}\n" for line in lines)
-        return
-
-    def appendToSessionFile(self, textToAppend, sessionFilePath):
-        raise (Exception("no longer used"))
-        """Append supplied text to the given file, adding a newline at the end
-    """
-        with open(sessionFilePath, "a") as f:
-            f.write(f"{textToAppend}\n")
-        return
-
-    def getListOfRunsFromSessionFile(self, sessionFilePath, delimiterLine="---\n"):
-        raise (Exception("no longer used"))
-        """Process session file to a list of recordings file names"""
-        with open(sessionFilePath, "r") as f:
-            lines = f.readlines()  # newlines are not removed!
-        # Find end of header
-        delimIdx = lines.index(delimiterLine)
-        # Make list of runs (after header and stripped of newline)
-        listOfRuns = [line.rstrip() for line in lines[delimIdx + 1 :]]
-        return listOfRuns
-
-    def constructCurrentSessionFilePath(
-        self, sessionDirectory, sessionFilePrefix, userName
-    ):
-        raise (Exception("no longer used"))
-        timeStamp = time.strftime(r"%Y-%m-%d-%H%M%S")
-        currentSessionFilePath = os.path.join(
-            sessionDirectory,
-            f"{sessionFilePrefix}{userName.replace(' ','_')}-{timeStamp}.txt",
-        )
-        return currentSessionFilePath
-
-    def processTrackerFileToRuns(
-        self,
-        mhaFile,
-        segmentationNode,
-        entryRegionName="entryZone",
-        deeperRegionName="deeperZone",
-    ):
-        raise (Exception("don't use, functionality transferred to Recording objects"))
-        """Inputs are name/path to saved tracker recording file, segmentation node with segments 
-      an entry zone and a deeper zone (used to define what counts as a run and how they should 
-      trimmed). 
-      Created during processing: Loaded path as markups curve node, trimmed paths (runs) 
-      """
-        (
-            timeStamps,
-            headSensorTransforms,
-            scopeSensorTransforms,
-        ) = self.import_tracker_recording(mhaFile)
-        # Set up the hierarchy order
-        # transformsList = self.gatherTestingTransforms()
-        leafNodeName = DEFAULT_LEAF_TRANSFORM_NODE_NAME  # TODO: don't hard code this!!
-        leafTransformNode = slicer.util.getNode(leafNodeName)
-        transformNames, transformsList = self.gatherTransformsFromTransformHierarchy(
-            leafTransformNode
-        )
-        # TODO: Verify that transformNames[1] looks like it's the dynamic head sensor and [2] looks like the dynamic scope sensor
-        # Replace the single transform matrix arrays in transformsList with the full set from
-        # the loaded file for both the head sensor and scope sensor
-        transformsList[HEAD_SENSOR_TRANSFORM_POSITION_IN_HIERARCHY] = (
-            headSensorTransforms
-        )
-        transformsList[SCOPE_SENSOR_TRANSFORM_POSITION_IN_HIERARCHY] = (
-            scopeSensorTransforms
-        )
-        # Get sequence of locations in RAS space
-        positions, orientations = self.positions_from_transform_hierarchy(
-            transformsList
-        )
-        rawPathModelNode = None  # self.modelNodeFromPositions(positions)
-        # rawCurveNode = self.markupsCurveFromPositions(positions)
-        # Gather runs data
-        runsData = self.identifyTrackingRunsFromRawPath(positions, segmentationNode)
-        pathRunsModelNodes = []
-        for runData in runsData:
-            startIdx, endIdx = runData
-            runPositions = positions[
-                startIdx : (endIdx + 1), :
-            ]  # NOTE: NOT a deep copy
-            runOrientations = orientations[startIdx : (endIdx + 1), :]
-            # self.trimPathToRange(positions, startIdx, endIdx)
-            pathRunModelNode = self.modelNodeFromPositionsAndOrientations(
-                runPositions, runOrientations, scalars=None, sizeFactor=2.0
-            )
-            pathRunsModelNodes.append(pathRunModelNode)
-        return pathRunsModelNodes, rawPathModelNode
-
-    def trimPathToRange(self, markupsNode, startIdx, endIdx, outputMarkupsNode=None):
-        """for trimming either or both ends off of a markupsNode.  Not currently used
-        at all.
-        """
-        import numpy as np
-
-        if outputMarkupsNode is None:
-            outName = slicer.mrmlScene.GenerateUniqueName(
-                markupsNode.GetName() + "_trimmed"
-            )
-            outputMarkupsNode = slicer.mrmlScene.AddNewNodeByClass(
-                "vtkMRMLMarkupsCurveNode", outName
-            )
-        arr = slicer.util.arrayFromMarkupsControlPoints(markupsNode)
-        slicer.util.updateMarkupsControlPointsFromArray(
-            outputMarkupsNode, arr[startIdx : (endIdx + 1), :]
-        )
-        return outputMarkupsNode
-
-    def identifyTrackingRunsFromRawPath(
-        self,
-        positionsArray,
-        segmentationNode,
-        entryRegionName="entryZone",
-        deeperRegionName="deeperZone",
-    ):
-        raise (
-            Exception(
-                "accessed ExampleGuidelet.identifyTrackingRunsFromRawPath, do not do that"
-            )
-        )
-        """ This function should take a markupsNode and process it's control points to trim out unnecessary
-      points from before entering the nose and after exiting the nose.  To count as a run, perhaps it should 
-      have points both in an "entry" region, and a "deeper" region.  Typical runs would start outside the 
-      "entry" zone, enter the entry zone, move onto the "deeper" zone, and finally move back through the "entry" 
-      zone and out.  However, it should also handle the cases where recording starts already in the "deeper" 
-      region. A run start has the following characteristics:
-      1. The first recorded point if it is in the deeperZone.  OR The first recorded point which is in the entryZone 
-      and which is followed a continuous series of points which are in the entryZone and which is then followed by
-      at least one point in the deeperZone before any points which are neither in the entryZone nor the deeperZone.
-      A run ends at the first point after a run has started which is outside the entryZone and deeperZone.  After a 
-      run is identified and ended, another run may be present.  Notes should announce when there are events when .
-      Another way to think about this would be that every deeperZone point should be part of run, and that run should 
-      include any leading or trailing entryZone points connected to it. 
-      A list of "run" groupings should be returned.  A run grouping is a list which has information on all the control
-      point loctations in the run, along with a matching list of indices into the original control points (to allow 
-      time-stamp recovery)
-      TODO: Add error correction for aberrant points.  How about, if there is a gap between runs of 
-      less than 5 points, then they should just be merged into 
-      """
-        import numpy as np
-
-        runsData = []
-        # points = slicer.util.arrayFromMarkupsControlPoints(markupsNode)
-        points = positionsArray
-        nPoints = points.shape[0]
-        segmentNames = self.getSegmentNamesAtRasPoint(segmentationNode, points)
-        # Make a mask of deeperZone points and entryZone points
-        deepMask = np.zeros((nPoints))
-        entryMask = np.zeros((nPoints))
-        for idx, point in enumerate(points):
-            segNamesNow = segmentNames[idx]
-            deepMask[idx] = 1 if deeperRegionName in segNamesNow else 0
-            entryMask[idx] = 1 if entryRegionName in segNamesNow else 0
-
-        # Make a mask of entryZone points
-        # Identify the first deeperZone point
-        # If no deeperZone points, no runs
-        if np.all(deepMask == 0):
-            logging.info(
-                f"No runs present because no points are inside {deeperRegionName} segment!"
-            )
-            return []
-
-        while np.any(deepMask == 1):
-            # Find first deep point index
-            firstDeepIdx = np.argmax(deepMask)
-            # Run backwards to find the first contiguous point which is still in either entry or deeper zone
-            startIdx = firstDeepIdx
-            while True:
-                if startIdx == 0 or (
-                    (deepMask[startIdx - 1] != 1) and (entryMask[startIdx - 1] != 1)
-                ):
-                    # This startIdx is the final one
-                    break
-                else:
-                    # Decrement
-                    startIdx = startIdx - 1
-            # Run forwards to find the last contiguous point which is still in either entry or deeper zone
-            lastIdx = firstDeepIdx
-            while True:
-                if lastIdx == len(deepMask) - 1 or (
-                    (deepMask[lastIdx + 1] != 1) and (entryMask[lastIdx + 1] != 1)
-                ):
-                    break
-                else:
-                    # increment
-                    lastIdx = lastIdx + 1
-            # Store data
-            runData = [startIdx, lastIdx]
-            logging.debug(f"Run identified from index {startIdx} to {lastIdx}.")
-            runsData.append(runData)
-            # Clear this run from deepMask
-            deepMask[startIdx : (lastIdx + 1)] = 0
-        return runsData
-
     def mhaTesting(self, mhaFile=None):
         if mhaFile is None:
             # mhaFile = r'C:\Users\mikeb\Downloads\ExampleGuideletRec-20230601-113809.mhd'
@@ -440,30 +241,6 @@ class ExampleGuideletLogic(GuideletLogic):
             headSensorTransforms,
             scopeSensorTransforms,
         )
-
-    def gatherTransformsFromTransformHierarchy(self, leafTransformNode):
-        raise (
-            Exception(
-                "Accessed ExampleGuidelet.gatherTransformsFromTransformHierarchy(), use recordings version instead"
-            )
-        )
-        """ Use the existing scene transform hierarchy to build transformList
-    """
-        shNode = slicer.mrmlScene.GetSubjectHierarchyNode()
-        leafTransformNode.GetTransformNodeID()
-        curT = leafTransformNode
-        transformNodeList = [leafTransformNode]
-        while curT.GetTransformNodeID():
-            # Get parent transform node
-            curT = slicer.mrmlScene.GetNodeByID(curT.GetTransformNodeID())
-            transformNodeList.append(curT)
-        # Reverse order so decending hierarchy rather than ascending
-        transformNodeList.reverse()
-        transformNames = [tNode.GetName() for tNode in transformNodeList]
-        transformList = [
-            slicer.util.arrayFromTransformMatrix(tNode) for tNode in transformNodeList
-        ]
-        return transformNames, transformList
 
     def gatherTestingTransforms(self):
         """Requires tracking example 2 scene loaded"""
@@ -505,7 +282,7 @@ class ExampleGuideletLogic(GuideletLogic):
         return curveNode
 
     def createVolumeFromROIandVoxelSize(
-        self, ROINode, voxelSizeMm=[1.0, 1.0, 1.0], prioritizeVoxelSize=True
+        self, ROINode, voxelSizeMm=(1.0, 1.0, 1.0), prioritizeVoxelSize=True
     ):
         """Create an empty scalar volume node with the given resolution, location, and
         orientation. The resolution must be given directly (single or scalar value interpreted
