@@ -1,8 +1,17 @@
 import os
+import pathlib
 
 # from __main__ import vtk, qt, ctk, slicer
 import slicer, vtk, qt, ctk
 from slicer import util
+
+import typing
+from typing import Optional, Union, Iterable, MutableMapping, Tuple, List, Type, Dict
+from slicer import (
+    vtkMRMLModelNode,
+    vtkMRMLTransformNode,
+    vtkMRMLLinearTransformNode,
+)
 
 from SlicerGuideletBase import (
     GuideletLoadable,
@@ -90,56 +99,57 @@ HEAD_SENSOR_TRANSFORM_POSITION_IN_HIERARCHY = 1
 SCOPE_SENSOR_TRANSFORM_POSITION_IN_HIERARCHY = 2
 DEFAULT_LEAF_TRANSFORM_NODE_NAME = "Extra"
 moduleDir = os.path.dirname(__file__)
+segDir = os.path.join(moduleDir, "Resources", "Segmentations")
 PEGNECK_AIRWAYZONE_SEGMENTATION = os.path.join(
-    moduleDir, "Resources", "Segmentations", "airwayZoneSegmentation.seg.nrrd"
+    segDir, "airwayZoneSegmentation.seg.nrrd"
 )
 
 RIGIDNECK_AIRWAYZONE_SEGMENTATION = os.path.join(
-    moduleDir, "Resources", "Segmentations", "RigidNeckAirwaySegmentation.seg.nrrd"
+    segDir, "RigidNeckAirwaySegmentation.seg.nrrd"
 )
-RIGIDNECK_STL = os.path.join(
-    moduleDir, "Resources", "Segmentations", "SolidOuter_Cropped.stl"
-)
+RIGIDNECK_STL = os.path.join(segDir, "SolidOuter_Cropped.stl")
 
-SUPINE_AIRWAYZONE_SEGMENTATION = os.path.join(
-    moduleDir, "Resources", "Segmentations", "SupineScanSegmentation.seg.nrrd"
-)
-SUPINE_STL = os.path.join(
-    moduleDir, "Resources", "Segmentations", "SupineSinusModel.vtk"
-)
-SUPINE_IMAGE = os.path.join(
-    moduleDir, "Resources", "Segmentations", "SupineCroppedImage.nrrd"
-)
+SUPINE_AIRWAYZONE_SEGMENTATION = os.path.join(segDir, "SupineScanSegmentation.seg.nrrd")
+SUPINE_STL = os.path.join(segDir, "SupineSinusModel.vtk")
+SUPINE_IMAGE = os.path.join(segDir, "SupineCroppedImage.nrrd")
 JULY9_AIRWAYZONE_SEGMENTATION = os.path.join(
-    moduleDir, "Resources", "Segmentations", "July9ScanAirwayZoneSegmentation.seg.nrrd"
+    segDir, "July9ScanAirwayZoneSegmentation.seg.nrrd"
 )
 JULY9_OUTERMODEL_STL = os.path.join(
-    moduleDir,
-    "Resources",
-    "Segmentations",
+    segDir,
     "July9ScanAirwayZoneSegmentation_OuterSupineSinusModel.stl",
 )
-JULY9_IMAGE = os.path.join(
-    moduleDir, "Resources", "Segmentations", "July9_AxBone11_cropped1mm.nrrd"
-)
+JULY9_IMAGE = os.path.join(segDir, "July9_AxBone11_cropped1mm.nrrd")
 
 AIRWAY_PRACTICE_2024_AIRWAYZONE_SEGMENTATION = os.path.join(
-    moduleDir, "Resources", "Segmentations", "SoundsSegmentation.seg.nrrd"
+    segDir, "SoundsSegmentationHardToJ9.seg.nrrd"
 )
 AIRWAY_PRACTICE_2024_IMAGE = os.path.join(
-    moduleDir,
-    "Resources",
-    "Segmentations",
-    "AIRWAY TESTING_Silicone Nose_PracticeModel_Scan.nrrd",
+    segDir,
+    "AIRWAY TESTING_Silicone Nose_PracticeModel_Scan_1mm.nrrd",
 )
 AIRWAY_PRACTICE_2024_OUTERMODEL_STL = os.path.join(
-    moduleDir,
-    "Resources",
-    "Segmentations",
-    "AIRWAY TESTING_Silicone Nose_Practice Model_001_1.stl",
+    segDir,
+    "PrintedPlasticSimpDecim_2024.stl",
 )
+COUGH_ZONE_MODEL_STL = os.path.join(segDir, "CoughZone.stl")
+COUGH_ZONE_COLOR = (0.945098, 0.839216, 0.568627)
+GAG_ZONE_MODEL_STL = os.path.join(segDir, "GagZone.stl")
+GAG_ZONE_COLOR = (0.694118, 0.478431, 0.396078)
+OUCH_ZONE_MODEL_STL = os.path.join(segDir, "OuchZone.stl")
+OUCH_ZONE_COLOR = (0.501961, 0.682353, 0.501961)
+TEST_ZONE_MODEL_STL = os.path.join(segDir, "testSoundZone.stl")
+# Sound Paths
+soundDir = os.path.join(moduleDir, "Resources", "Sounds")
+COUGH_SOUND_PATH = pathlib.Path(soundDir, "cough1.wav")
+GAG_SOUND_PATH = pathlib.Path(soundDir, "Ow.wav")  # FIX when gag sound is available
+OUCH_SOUND_PATH = pathlib.Path(soundDir, "OwMySeptum.wav")
+MOUTH_SOUND_PATH = pathlib.Path(soundDir, "Mouth.wav")
+RIGHT_NOSTRIP_SOUND_PATH = pathlib.Path(soundDir, "RightNostril.wav")
+TEST_SOUND_PATH = pathlib.Path(soundDir, "testZoneSound.wav")
 
 
+# MARK: ExampleGuideletLogic
 class ExampleGuideletLogic(GuideletLogic):
     """Uses GuideletLogic base class, available at:"""  # TODO add path
 
@@ -268,10 +278,75 @@ class ExampleGuideletLogic(GuideletLogic):
             "RecordingFilenamePrefix": "AirwayTrackerRec-",
             "UserSessionResultsDirectory": defaultUserSessionsSavePath,  # folder to put session files in
             "SavedScenesDirectory": defaultSceneSavePath,  # overwrites the default setting param of base
+            "testParameter": "DoesThisShowUp?",
+            "soundDistanceThresholdMm": "3.0",
         }
         self.updateSettings(settingList, "Default")
 
+    def setupBreachSound(
+        self,
+        soundFilePath: pathlib.Path,
+        tipTransform: vtkMRMLTransformNode,
+        watchedModel: vtkMRMLModelNode,
+        distanceThresholdMm: float = 5.0,
+        outputBreachWarningNode=None,
+        showLinkingLine=True,
+    ):
+        """Set up a sound to play when a model is approached too closely.
+        The sound file must be .wav.  Negative distance thresholds would
+        be inside the model (use zero or positive).  The mechanism used
+        is a vtkMRMLBreachWarningNode.
+        """
+        sound = qt.QSoundEffect()
+        sourceUrl = qt.QUrl.fromLocalFile(soundFilePath)
+        sound.setSource(sourceUrl)
+        # Can check if loading went OK by checking sound.status
+        # Should probably warn here if it didn't load properly
+        if outputBreachWarningNode is None:
+            outputBreachWarningNode = slicer.mrmlScene.AddNewNodeByClass(
+                "vtkMRMLBreachWarningNode"
+            )
+        outputBreachWarningNode.SetAndObserveToolTransformNodeId(tipTransform.GetID())
+        outputBreachWarningNode.SetAndObserveWatchedModelNodeID(watchedModel.GetID())
+        outputBreachWarningNode.SetWarningDistanceMM(distanceThresholdMm)
+        outputBreachWarningNode.SetPlayWarningSound(
+            False
+        )  # wav file should be played rather than beep
+        if showLinkingLine:
+            slicer.modules.breachwarning.logic().SetLineToClosestPointVisibility(
+                True, outputBreachWarningNode
+            )
+        # Set up observer
+        callbackFcn = lambda unused1, unused2: self.zoneModelModified(
+            outputBreachWarningNode, sound
+        )
+        # The lambda is needed because the callback is going to get two extra inputs which
+        # aren't needed or used
+        observerTag = watchedModel.GetDisplayNode().AddObserver(
+            vtk.vtkCommand.ModifiedEvent, callbackFcn
+        )
+        return outputBreachWarningNode, (watchedModel, observerTag, callbackFcn)
 
+    def zoneModelModified(self, assocBreachWarningNode, soundEffect):
+        """Trigger to possibly play sound effect, only if the associated
+        breach warning node reports less than threshold distance, and only
+        if the soundEffect is not already playing.
+        This is the callback assigned to modification of the watched model
+        (breach warning triggers color change, triggering Modified event,
+        which launches this callback)
+        """
+        logging.debug(
+            "zoneModelModified() triggered with breach node watching the display node of %s",
+            assocBreachWarningNode.GetWatchedModelNode().GetID(),
+        )
+        if (
+            assocBreachWarningNode.IsToolTipInsideModel()
+            and not soundEffect.isPlaying()
+        ):
+            soundEffect.play()
+
+
+# MARK: ExampleGuideletTest
 class ExampleGuideletTest(GuideletTest):
     """This is the test case for your scripted module."""
 
@@ -281,6 +356,7 @@ class ExampleGuideletTest(GuideletTest):
         # self.test_ExampleGuidelet1() #add applet specific tests here
 
 
+# MARK: ExampleGuideletGuidelet
 class ExampleGuideletGuidelet(Guidelet):
     def __init__(self, parent, logic, configurationName="Default"):
         # self.calibrationCollapsibleButton = None
@@ -308,12 +384,14 @@ class ExampleGuideletGuidelet(Guidelet):
         # Init guidelet
         Guidelet.__init__(self, parent, logic, configurationName)
         # self.parameterNode is created in Guidelet.__init__()
+        self.zoneModelObserversList = []
         self._updatingGuideletGUIFromParameterNode = False
         self.updateParameterNodeFromGuideletGUI()  # force initial update from loaded GUI values (could also set up parameter node
         # ahead of time, but if we don't do either we end up trying to update the GUI from empty parameter node fields)
 
         logging.debug("ExampleGuideletGuidelet.__init__")
 
+        # TODO: understand what this next line really does
         self.logic.addValuesToDefaultConfiguration()
 
         moduleDirectoryPath = slicer.modules.exampleguidelet.path.replace(
@@ -328,7 +406,7 @@ class ExampleGuideletGuidelet(Guidelet):
         self.mainWindow.windowIcon = qt.QIcon(
             moduleDirectoryPath + "/Resources/Icons/ExampleGuidelet.png"
         )
-
+        # Load image, segmentation, models
         self.setupScene()
 
         self.navigationView = self.VIEW_3D
@@ -336,6 +414,9 @@ class ExampleGuideletGuidelet(Guidelet):
         # Setting button open on startup.
         # self.calibrationCollapsibleButton.setProperty('collapsed', False)
         self.scopeRunsDisplayed = []  # initalize, no runs showing right now
+
+        # Set up sounds to be able to play as warnings
+        self.setupSounds()
 
     def updateParameterNodeFromGuideletGUI(self, caller=None, event=None):
         """Update parameter node values from current GUI information"""
@@ -408,6 +489,14 @@ class ExampleGuideletGuidelet(Guidelet):
 
         return featurePanelList
 
+    def removeZoneModelObservers(self):
+        """Remove the observers watching the various breach warning watched models,
+        if present
+        """
+        for model, observerTag, callbackFcn in self.zoneModelObserversList:
+            model.RemoveObserver(observerTag)
+        self.zoneModelObserversList = []
+
     def __del__(self):  # common
         self.preCleanup()
 
@@ -415,6 +504,7 @@ class ExampleGuideletGuidelet(Guidelet):
     def preCleanup(self):  # common
         Guidelet.preCleanup(self)
         self.disconnect()
+        self.removeZoneModelObservers()
 
         logging.debug("preCleanup")
 
@@ -473,7 +563,55 @@ class ExampleGuideletGuidelet(Guidelet):
         # self.exampleButton.connect('clicked(bool)', self.onExampleButtonClicked)
         # TODO: Ensure disconnect() has all matching disconnections
 
-    def onLiveUpdateCheckBoxToggled(self, bool):
+    def setupSounds(self):
+        """Set up all sounds which should be triggered by touching airway
+        walls in certain places.  Create QSoundEffect resources and
+        link them to models and distance thresholds.
+        """
+        # Gather defaults
+
+        # MARK: Working HERE
+        pn = self.parameterNode
+        leafTransformNode = pn.GetNodeReference("sceneLeafTransformNode")
+        distThreshMm = (
+            float(pn.GetParameter("soundDistanceThresholdMm"))
+            if pn.GetParameter("soundDistanceThresholdMm")
+            else 0.0
+        )
+        # Cough
+        coughZoneModel = pn.GetNodeReference("coughZoneModel")
+        coughSoundPath = pathlib.Path(pn.GetParameter("coughSoundPath"))
+        coughBreachNode, coughObsInfo = self.logic.setupBreachSound(
+            coughSoundPath, leafTransformNode, coughZoneModel, distThreshMm
+        )
+        self.zoneModelObserversList.append(coughObsInfo)
+        pn.SetNodeReferenceID("coughBreachNode", coughBreachNode.GetID())
+        # Gag
+        gagZoneModel = pn.GetNodeReference("gagZoneModel")
+        gagSoundPath = pathlib.Path(pn.GetParameter("gagSoundPath"))
+        gagBreachNode, gagObsInfo = self.logic.setupBreachSound(
+            gagSoundPath, leafTransformNode, gagZoneModel, distThreshMm
+        )
+        pn.SetNodeReferenceID("gagBreachNode", gagBreachNode.GetID())
+        self.zoneModelObserversList.append(gagObsInfo)
+        # Septum
+        septumZoneModel = pn.GetNodeReference("septumZoneModel")
+        septumSoundPath = pathlib.Path(pn.GetParameter("septumSoundPath"))
+        septumBreachNode, septumObsInfo = self.logic.setupBreachSound(
+            septumSoundPath, leafTransformNode, septumZoneModel, distThreshMm
+        )
+        pn.SetNodeReferenceID("septumBreachNode", septumBreachNode.GetID())
+        self.zoneModelObserversList.append(septumObsInfo)
+        # TestZone
+        testZoneModel = pn.GetNodeReference("testZoneModel")
+        testZoneSoundPath = pathlib.Path(pn.GetParameter("testZoneSoundPath"))
+        testBreachNode, testObsInfo = self.logic.setupBreachSound(
+            testZoneSoundPath, leafTransformNode, testZoneModel, distThreshMm
+        )
+        pn.SetNodeReferenceID("testBreachNode", testBreachNode.GetID())
+        self.zoneModelObserversList.append(testObsInfo)
+
+    def onLiveUpdateCheckBoxToggled(self, tf: bool):
         """Toggle whether live updating is occuring"""
         if self.liveUpdateCheckBox.checked:
             self.selectView(self.VIEW_4UP)
@@ -485,8 +623,8 @@ class ExampleGuideletGuidelet(Guidelet):
         else:
             self.logic.stopLiveUpdate()
 
-    def showSliceIntersctions(self, bool):
-        if bool:
+    def showSliceIntersctions(self, tf: bool):
+        if tf:
             visiblity = 1
         else:
             visiblity = 0
@@ -511,7 +649,7 @@ class ExampleGuideletGuidelet(Guidelet):
         # Track that this run is showing
         self.scopeRunsDisplayed.append(scopeRunToDisplay)
 
-    def saveUserInfoButtonClicked(self, bool):
+    def saveUserInfoButtonClicked(self, tf: bool):
         """Update the current user text section and save a session text file"""
         # User
         userText = self.parameterNode.GetParameter("userNameLineEditString")
@@ -726,7 +864,7 @@ class ExampleGuideletGuidelet(Guidelet):
             False  # TODO: make this switchable as a configuration
         )
         using2024PracticeScan = True
-
+        pn = self.parameterNode
         if usingPegNeckHead:
             AIRWAYZONE_SEGMENTATION = PEGNECK_AIRWAYZONE_SEGMENTATION
         elif usingScannedRigidNeckHead:
@@ -755,7 +893,27 @@ class ExampleGuideletGuidelet(Guidelet):
             #
             imageNode = slicer.util.loadVolume(AIRWAY_PRACTICE_2024_IMAGE)
             AIRWAYZONE_SEGMENTATION = AIRWAY_PRACTICE_2024_AIRWAYZONE_SEGMENTATION
-            # Load STL here also?
+            # Load STL here also (outer model)
+
+            # Load sound models (or export from segmentation)
+            coughZoneModel = slicer.util.loadModel(COUGH_ZONE_MODEL_STL)
+            coughZoneModel.GetDisplayNode().SetColor(COUGH_ZONE_COLOR)
+            pn.SetNodeReferenceID("coughZoneModel", coughZoneModel.GetID())
+            pn.SetParameter("coughSoundPath", COUGH_SOUND_PATH.as_posix())
+
+            gagZoneModel = slicer.util.loadModel(GAG_ZONE_MODEL_STL)
+            gagZoneModel.GetDisplayNode().SetColor(GAG_ZONE_COLOR)
+            pn.SetNodeReferenceID("gagZoneModel", gagZoneModel.GetID())
+            pn.SetParameter("gagSoundPath", GAG_SOUND_PATH.as_posix())
+
+            ouchZoneModel = slicer.util.loadModel(OUCH_ZONE_MODEL_STL)
+            ouchZoneModel.GetDisplayNode().SetColor(OUCH_ZONE_COLOR)
+            pn.SetNodeReferenceID("septumZoneModel", ouchZoneModel.GetID())
+            pn.SetParameter("septumSoundPath", OUCH_SOUND_PATH.as_posix())
+            #
+            testZoneModel = slicer.util.loadModel(TEST_ZONE_MODEL_STL)
+            pn.SetNodeReferenceID("testZoneModel", testZoneModel.GetID())
+            pn.SetParameter("testZoneSoundPath", TEST_SOUND_PATH.as_posix())
 
         # Load airwayZone segmentation
         airwayZoneSegmentationNode = slicer.util.loadSegmentation(
@@ -794,6 +952,14 @@ class ExampleGuideletGuidelet(Guidelet):
             slicer.util.errorDisplay(
                 "Expected transform not found, running it test/debug mode!"
             )
+            # Create a dummy tip transform named "Extra"
+            self.ExtraTransform = self.createTransformNode(
+                translationMm=[0, 0, 6], transformName="Extra"
+            )
+            self.parameterNode.SetNodeReferenceID(
+                "sceneLeafTransformNode", self.ExtraTransform.GetID()
+            )
+            self.leafTransformNodeSelector.setCurrentNodeID(self.ExtraTransform.GetID())
             return  # return early since the rest of the method will fail
 
         self.EmTrackerToHeadSensor = slicer.util.getNode("EmTrackerToHeadSenso")
@@ -809,6 +975,9 @@ class ExampleGuideletGuidelet(Guidelet):
             self.HeadSensorToHeadSTL = slicer.util.getNode("HeadSensorToScan2STL")
         elif usingJuly9Scan:
             self.HeadSensorToHeadSTL = slicer.util.getNode("HeadSensorToJuly9Sca")
+        elif using2024PracticeScan:
+            # Reuse because registered 2024 practice to this space
+            self.HeadSensorToHeadSTL = slicer.util.getNode("HeadSensorTo2024Prac")
         else:
             self.HeadSensorToHeadSTL = slicer.util.getNode("HeadSensorToHeadSTL")
         try:
@@ -925,7 +1094,7 @@ class ExampleGuideletGuidelet(Guidelet):
         self.startStopRecordingButton.setToolTip(statusText)
 
     def createTransformNode(
-        self, translationMm=[0, 0, 0], transformName="CreatedTransform"
+        self, translationMm=(0, 0, 0), transformName="CreatedTransform"
     ):
         """Create a simple translation-only linear transform node from scratch"""
         import numpy as np
