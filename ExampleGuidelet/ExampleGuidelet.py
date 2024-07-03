@@ -100,6 +100,8 @@ SCOPE_SENSOR_TRANSFORM_POSITION_IN_HIERARCHY = 2
 DEFAULT_LEAF_TRANSFORM_NODE_NAME = "Extra"
 moduleDir = os.path.dirname(__file__)
 segDir = os.path.join(moduleDir, "Resources", "Segmentations")
+segDir2024F = os.path.join(moduleDir, "Resources", "Segmentations", "BootCamp2024Final")
+
 PEGNECK_AIRWAYZONE_SEGMENTATION = os.path.join(
     segDir, "airwayZoneSegmentation.seg.nrrd"
 )
@@ -132,20 +134,30 @@ AIRWAY_PRACTICE_2024_OUTERMODEL_STL = os.path.join(
     segDir,
     "PrintedPlasticSimpDecim_2024.stl",
 )
-COUGH_ZONE_MODEL_STL = os.path.join(segDir, "CoughZone.stl")
+
+Final2024_OUTERMODEL_STL = os.path.join(segDir2024F, "PrintedPlasticSolidApprox.stl")
+Final2024_AIRWAYZONE_SEGMENTATION = os.path.join(
+    segDir2024F, "airwayZoneOnly_LowRes2mm.seg.nrrd"
+)
+Final2024_IMAGE = os.path.join(segDir2024F, "Final2024BootCamp_1mm.nrrd")
+
+COUGH_ZONE_MODEL_STL = os.path.join(segDir2024F, "CoughZone.stl")
 COUGH_ZONE_COLOR = (0.945098, 0.839216, 0.568627)
-GAG_ZONE_MODEL_STL = os.path.join(segDir, "GagZone.stl")
+GAG_ZONE_MODEL_STL = os.path.join(segDir2024F, "GagZone.stl")
 GAG_ZONE_COLOR = (0.694118, 0.478431, 0.396078)
-OUCH_ZONE_MODEL_STL = os.path.join(segDir, "OuchZone.stl")
-OUCH_ZONE_COLOR = (0.501961, 0.682353, 0.501961)
-TEST_ZONE_MODEL_STL = os.path.join(segDir, "testSoundZone.stl")
+OUCH2_ZONE_MODEL_STL = os.path.join(segDir2024F, "OuchZone2.stl")
+OUCH2_ZONE_COLOR = (0.501961, 0.682353, 0.501961)
+SEPTUM_ZONE_MODEL_STL = os.path.join(segDir2024F, "SeptumZoneTrimmed.stl")
+SEPTUM_ZONE_COLOR = (0.5647, 0.9333, 0.5647)
+# TEST_ZONE_MODEL_STL = os.path.join(segDir, "testSoundZone.stl")
 # Sound Paths
 soundDir = os.path.join(moduleDir, "Resources", "Sounds")
 COUGH_SOUND_PATH = pathlib.Path(soundDir, "cough1.wav")
-GAG_SOUND_PATH = pathlib.Path(soundDir, "Ow.wav")  # FIX when gag sound is available
-OUCH_SOUND_PATH = pathlib.Path(soundDir, "OwMySeptum.wav")
+GAG_SOUND_PATH = pathlib.Path(soundDir, "gag1.wav")  # or gag2.wav
+SEPTUM_SOUND_PATH = pathlib.Path(soundDir, "OwMySeptum.wav")
+OUCH2_SOUND_PATH = pathlib.Path(soundDir, "Ow.wav")
 MOUTH_SOUND_PATH = pathlib.Path(soundDir, "Mouth.wav")
-RIGHT_NOSTRIP_SOUND_PATH = pathlib.Path(soundDir, "RightNostril.wav")
+RIGHT_NOSTRIL_SOUND_PATH = pathlib.Path(soundDir, "RightNostril.wav")
 TEST_SOUND_PATH = pathlib.Path(soundDir, "testZoneSound.wav")
 
 
@@ -279,7 +291,11 @@ class ExampleGuideletLogic(GuideletLogic):
             "UserSessionResultsDirectory": defaultUserSessionsSavePath,  # folder to put session files in
             "SavedScenesDirectory": defaultSceneSavePath,  # overwrites the default setting param of base
             "testParameter": "DoesThisShowUp?",
-            "soundDistanceThresholdMm": "3.0",
+            "defaultSoundDistanceThresholdMm": "2.0",
+            "septumZoneSoundDistThreshMm": "2.0",
+            "ouch2ZoneSoundDistThreshMm": "1.0",
+            "gagZoneSoundDistThreshMm": "3.0",
+            "coughZoneSoundDistThreshMm": "2.0",
         }
         self.updateSettings(settingList, "Default")
 
@@ -291,6 +307,8 @@ class ExampleGuideletLogic(GuideletLogic):
         distanceThresholdMm: float = 5.0,
         outputBreachWarningNode=None,
         showLinkingLine=True,
+        breachNodeName=None,
+        linkingLineName="d",
     ):
         """Set up a sound to play when a model is approached too closely.
         The sound file must be .wav.  Negative distance thresholds would
@@ -298,7 +316,7 @@ class ExampleGuideletLogic(GuideletLogic):
         is a vtkMRMLBreachWarningNode.
         """
         sound = qt.QSoundEffect()
-        sourceUrl = qt.QUrl.fromLocalFile(soundFilePath)
+        sourceUrl = qt.QUrl.fromLocalFile(soundFilePath.as_posix())
         sound.setSource(sourceUrl)
         # Can check if loading went OK by checking sound.status
         # Should probably warn here if it didn't load properly
@@ -312,10 +330,19 @@ class ExampleGuideletLogic(GuideletLogic):
         outputBreachWarningNode.SetPlayWarningSound(
             False
         )  # wav file should be played rather than beep
-        if showLinkingLine:
+
+        # Regardless of showLinkingLine value, initially show it to create
+        # line node, then hide if it is not supposed to be shown
+        slicer.modules.breachwarning.logic().SetLineToClosestPointVisibility(
+            True, outputBreachWarningNode
+        )
+        if not showLinkingLine:
+            # Hide the linking line
             slicer.modules.breachwarning.logic().SetLineToClosestPointVisibility(
-                True, outputBreachWarningNode
+                False, outputBreachWarningNode
             )
+        # Set line name
+        outputBreachWarningNode.GetLineToClosestPointNode().SetName(linkingLineName)
         # Set up observer
         callbackFcn = lambda unused1, unused2: self.zoneModelModified(
             outputBreachWarningNode, sound
@@ -325,6 +352,9 @@ class ExampleGuideletLogic(GuideletLogic):
         observerTag = watchedModel.GetDisplayNode().AddObserver(
             vtk.vtkCommand.ModifiedEvent, callbackFcn
         )
+        # Apply name
+        if breachNodeName is not None:
+            outputBreachWarningNode.SetName(breachNodeName)
         return outputBreachWarningNode, (watchedModel, observerTag, callbackFcn)
 
     def zoneModelModified(self, assocBreachWarningNode, soundEffect):
@@ -568,48 +598,73 @@ class ExampleGuideletGuidelet(Guidelet):
         walls in certain places.  Create QSoundEffect resources and
         link them to models and distance thresholds.
         """
-        # Gather defaults
-
-        # MARK: Working HERE
         pn = self.parameterNode
         leafTransformNode = pn.GetNodeReference("sceneLeafTransformNode")
-        distThreshMm = (
-            float(pn.GetParameter("soundDistanceThresholdMm"))
-            if pn.GetParameter("soundDistanceThresholdMm")
-            else 0.0
-        )
+
         # Cough
         coughZoneModel = pn.GetNodeReference("coughZoneModel")
         coughSoundPath = pathlib.Path(pn.GetParameter("coughSoundPath"))
+        coughDistThresh = float(pn.GetParameter("coughZoneSoundDistThreshMm"))
         coughBreachNode, coughObsInfo = self.logic.setupBreachSound(
-            coughSoundPath, leafTransformNode, coughZoneModel, distThreshMm
+            coughSoundPath,
+            leafTransformNode,
+            coughZoneModel,
+            coughDistThresh,
+            breachNodeName="coughBreach",
+            linkingLineName="c",
         )
         self.zoneModelObserversList.append(coughObsInfo)
         pn.SetNodeReferenceID("coughBreachNode", coughBreachNode.GetID())
         # Gag
         gagZoneModel = pn.GetNodeReference("gagZoneModel")
         gagSoundPath = pathlib.Path(pn.GetParameter("gagSoundPath"))
+        gagDistThresh = float(pn.GetParameter("gagZoneSoundDistThreshMm"))
         gagBreachNode, gagObsInfo = self.logic.setupBreachSound(
-            gagSoundPath, leafTransformNode, gagZoneModel, distThreshMm
+            gagSoundPath,
+            leafTransformNode,
+            gagZoneModel,
+            gagDistThresh,
+            breachNodeName="gagBreach",
+            linkingLineName="g",
         )
         pn.SetNodeReferenceID("gagBreachNode", gagBreachNode.GetID())
         self.zoneModelObserversList.append(gagObsInfo)
         # Septum
         septumZoneModel = pn.GetNodeReference("septumZoneModel")
         septumSoundPath = pathlib.Path(pn.GetParameter("septumSoundPath"))
+        septumDistThresh = float(pn.GetParameter("septumZoneSoundDistThreshMm"))
         septumBreachNode, septumObsInfo = self.logic.setupBreachSound(
-            septumSoundPath, leafTransformNode, septumZoneModel, distThreshMm
+            septumSoundPath,
+            leafTransformNode,
+            septumZoneModel,
+            septumDistThresh,
+            breachNodeName="septumBreach",
+            linkingLineName="s",
         )
         pn.SetNodeReferenceID("septumBreachNode", septumBreachNode.GetID())
         self.zoneModelObserversList.append(septumObsInfo)
-        # TestZone
-        testZoneModel = pn.GetNodeReference("testZoneModel")
-        testZoneSoundPath = pathlib.Path(pn.GetParameter("testZoneSoundPath"))
-        testBreachNode, testObsInfo = self.logic.setupBreachSound(
-            testZoneSoundPath, leafTransformNode, testZoneModel, distThreshMm
+        # OuchZone2 (straight back poke with tip)
+        ouch2ZoneModel = pn.GetNodeReference("ouch2ZoneModel")
+        ouch2SoundPath = pathlib.Path(pn.GetParameter("ouch2SoundPath"))
+        ouch2DistThresh = float(pn.GetParameter("ouch2ZoneSoundDistThreshMm"))
+        ouch2BreachNode, ouch2ObsInfo = self.logic.setupBreachSound(
+            ouch2SoundPath,
+            leafTransformNode,
+            ouch2ZoneModel,
+            ouch2DistThresh,
+            breachNodeName="ouch2Breach",
+            linkingLineName="o",
         )
-        pn.SetNodeReferenceID("testBreachNode", testBreachNode.GetID())
-        self.zoneModelObserversList.append(testObsInfo)
+        pn.SetNodeReferenceID("ouch2BreachNode", ouch2BreachNode.GetID())
+        self.zoneModelObserversList.append(ouch2ObsInfo)
+        # TestZone
+        # testZoneModel = pn.GetNodeReference("testZoneModel")
+        # testZoneSoundPath = pathlib.Path(pn.GetParameter("testZoneSoundPath"))
+        # testBreachNode, testObsInfo = self.logic.setupBreachSound(
+        #     testZoneSoundPath, leafTransformNode, testZoneModel, distThreshMm
+        # )
+        # pn.SetNodeReferenceID("testBreachNode", testBreachNode.GetID())
+        # self.zoneModelObserversList.append(testObsInfo)
 
     def onLiveUpdateCheckBoxToggled(self, tf: bool):
         """Toggle whether live updating is occuring"""
@@ -863,7 +918,9 @@ class ExampleGuideletGuidelet(Guidelet):
         usingScannedRigidNeckHead = (
             False  # TODO: make this switchable as a configuration
         )
-        using2024PracticeScan = True
+        using2024PracticeScan = False
+        using2024FinalScan = True
+
         pn = self.parameterNode
         if usingPegNeckHead:
             AIRWAYZONE_SEGMENTATION = PEGNECK_AIRWAYZONE_SEGMENTATION
@@ -889,6 +946,36 @@ class ExampleGuideletGuidelet(Guidelet):
             outerModelNode.GetDisplayNode().SetOpacity(0.1)
             # Load matching image
             imageNode = slicer.util.loadVolume(JULY9_IMAGE)
+        elif using2024FinalScan:
+            imageNode = slicer.util.loadVolume(Final2024_IMAGE)
+            AIRWAYZONE_SEGMENTATION = Final2024_AIRWAYZONE_SEGMENTATION
+            # Load STL here also (outer model)
+            outerModelNode = slicer.util.loadModel(Final2024_OUTERMODEL_STL)
+            outerModelNode.GetDisplayNode().SetOpacity(0.1)
+
+            # Load sound models (or export from segmentation)
+            coughZoneModel = slicer.util.loadModel(COUGH_ZONE_MODEL_STL)
+            coughZoneModel.GetDisplayNode().SetColor(COUGH_ZONE_COLOR)
+            pn.SetNodeReferenceID("coughZoneModel", coughZoneModel.GetID())
+            pn.SetParameter("coughSoundPath", COUGH_SOUND_PATH.as_posix())
+
+            gagZoneModel = slicer.util.loadModel(GAG_ZONE_MODEL_STL)
+            gagZoneModel.GetDisplayNode().SetColor(GAG_ZONE_COLOR)
+            pn.SetNodeReferenceID("gagZoneModel", gagZoneModel.GetID())
+            pn.SetParameter("gagSoundPath", GAG_SOUND_PATH.as_posix())
+            septumZoneModel = slicer.util.loadModel(SEPTUM_ZONE_MODEL_STL)
+            septumZoneModel.GetDisplayNode().SetColor(SEPTUM_ZONE_COLOR)
+            pn.SetNodeReferenceID("septumZoneModel", septumZoneModel.GetID())
+            pn.SetParameter("septumSoundPath", SEPTUM_SOUND_PATH.as_posix())
+
+            ouch2ZoneModel = slicer.util.loadModel(OUCH2_ZONE_MODEL_STL)
+            ouch2ZoneModel.GetDisplayNode().SetColor(OUCH2_ZONE_COLOR)
+            pn.SetNodeReferenceID("ouch2ZoneModel", ouch2ZoneModel.GetID())
+            pn.SetParameter("ouch2SoundPath", OUCH2_SOUND_PATH.as_posix())
+            #
+            # testZoneModel = slicer.util.loadModel(TEST_ZONE_MODEL_STL)
+            # pn.SetNodeReferenceID("testZoneModel", testZoneModel.GetID())
+            # pn.SetParameter("testZoneSoundPath", TEST_SOUND_PATH.as_posix())
         elif using2024PracticeScan:
             #
             imageNode = slicer.util.loadVolume(AIRWAY_PRACTICE_2024_IMAGE)
@@ -954,7 +1041,7 @@ class ExampleGuideletGuidelet(Guidelet):
             )
             # Create a dummy tip transform named "Extra"
             self.ExtraTransform = self.createTransformNode(
-                translationMm=[0, 0, 6], transformName="Extra"
+                translationMm=[0, 0, 12], transformName="Extra"
             )
             self.parameterNode.SetNodeReferenceID(
                 "sceneLeafTransformNode", self.ExtraTransform.GetID()
@@ -978,6 +1065,8 @@ class ExampleGuideletGuidelet(Guidelet):
         elif using2024PracticeScan:
             # Reuse because registered 2024 practice to this space
             self.HeadSensorToHeadSTL = slicer.util.getNode("HeadSensorTo2024Prac")
+        elif using2024FinalScan:
+            self.HeadSensorToHeadSTL = slicer.util.getNode("HeadSensorTo2024Fina")
         else:
             self.HeadSensorToHeadSTL = slicer.util.getNode("HeadSensorToHeadSTL")
         try:
