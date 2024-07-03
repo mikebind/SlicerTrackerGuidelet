@@ -52,15 +52,16 @@
   -->
   <CoordinateDefinitions>
 	<!--
-	Newly scanned for 2024 bootcamp final model. Rigid neck, silicone airway.
+	Newly scanned for 2024 bootcamp final model. Rigid neck, silicone airway. Applied museum wax
+	to better lock down the head sensor, which had shifted.  Also used an interior corner as 
+	a fiducial point rather than the lips (which are hard to landmark on the scan).
 	-->
 	<Transform From="HeadSensor" To="2024FinalScan"
-	Matrix="0.0578646 0.998216 0.0147025 -9.7573 
-	0.823357 -0.0393896 -0.566155 -204.442 
-	-0.564566 0.0448657 -0.824168 196.05 
+	Matrix="0.0660032 0.997817 -0.00216096 -10.2857 
+	0.80048 -0.0542425 -0.5969 -206.216 
+	-0.595714 0.0376675 -0.802313 195.482 
 	0 0 0 1 "
-	Error="0.967" Date="2024.07.02" />
-
+	Error="0.7061" Date="2024.07.03" />
 
 	<!--   
 	The following defines a StylusTipToStylusSensor transformation matrix which is fixed and should be a decent calibration for the stylus object printed on 3/7/2023. It could be updated by re-running the pivot and spin calibration steps in Slicer and copy/pasting the resulting transformation into here.  Error reported is an estimate from memory, updated versions should record the actual error. 
