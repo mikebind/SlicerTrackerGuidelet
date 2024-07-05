@@ -140,8 +140,9 @@ Final2024_AIRWAYZONE_SEGMENTATION = os.path.join(
     segDir2024F, "airwayZoneOnly_LowRes2mm.seg.nrrd"
 )
 Final2024_IMAGE = os.path.join(segDir2024F, "Final2024BootCamp_1mm.nrrd")
+FOR_VIEWPOINT_TRANSFORM_2024_SCOPE1 = os.path.join(segDir2024F, "ForViewpoint.h5")
 
-COUGH_ZONE_MODEL_STL = os.path.join(segDir2024F, "CoughZone.stl")
+COUGH_ZONE_MODEL_STL = os.path.join(segDir2024F, "CoughZoneTrimmed.stl")
 COUGH_ZONE_COLOR = (0.945098, 0.839216, 0.568627)
 GAG_ZONE_MODEL_STL = os.path.join(segDir2024F, "GagZone.stl")
 GAG_ZONE_COLOR = (0.694118, 0.478431, 0.396078)
@@ -306,7 +307,7 @@ class ExampleGuideletLogic(GuideletLogic):
         watchedModel: vtkMRMLModelNode,
         distanceThresholdMm: float = 5.0,
         outputBreachWarningNode=None,
-        showLinkingLine=True,
+        showLinkingLine=False,
         breachNodeName=None,
         linkingLineName="d",
     ):
@@ -952,6 +953,11 @@ class ExampleGuideletGuidelet(Guidelet):
             # Load STL here also (outer model)
             outerModelNode = slicer.util.loadModel(Final2024_OUTERMODEL_STL)
             outerModelNode.GetDisplayNode().SetOpacity(0.1)
+            # Load ForViewpoint transform (for bullseye view)
+            forViewpointTransform = slicer.util.loadTransform(
+                FOR_VIEWPOINT_TRANSFORM_2024_SCOPE1
+            )
+            self.forViewpointTransform = forViewpointTransform
 
             # Load sound models (or export from segmentation)
             coughZoneModel = slicer.util.loadModel(COUGH_ZONE_MODEL_STL)
@@ -1041,7 +1047,7 @@ class ExampleGuideletGuidelet(Guidelet):
             )
             # Create a dummy tip transform named "Extra"
             self.ExtraTransform = self.createTransformNode(
-                translationMm=[0, 0, 12], transformName="Extra"
+                translationMm=[0, 0, 7.5], transformName="Extra"
             )
             self.parameterNode.SetNodeReferenceID(
                 "sceneLeafTransformNode", self.ExtraTransform.GetID()
@@ -1126,6 +1132,15 @@ class ExampleGuideletGuidelet(Guidelet):
             "sceneLeafTransformNode", self.ExtraTransform.GetID()
         )
         self.leafTransformNodeSelector.setCurrentNodeID(self.ExtraTransform.GetID())
+
+        # Add forViewpoint transform to the hierarchy if present
+        if hasattr(self, "forViewpointTransform"):
+            sceneLeafTransformNode = self.parameterNode.GetNodeReference(
+                "sceneLeafTransformNode"
+            )
+            self.forViewpointTransform.SetAndObserveTransformNodeID(
+                sceneLeafTransformNode.GetID()
+            )
 
         return
 
