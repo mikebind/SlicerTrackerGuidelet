@@ -18,6 +18,7 @@ class Session(object):
 
     @classmethod
     def loadFromFile(cls, filePathName):
+        """Code looks non-functional..."""
         logging.debug(f'Session.loadFromFile("{filePathName}")')
         with open(filePathName, "r") as f:
             # Parse file text
@@ -125,7 +126,7 @@ class Session(object):
 
 
 class Recording(object):
-    def __init__(self, parentSessionObject, recordingFilePath, listOfScopeRuns=[]):
+    def __init__(self, parentSessionObject, recordingFilePath, listOfScopeRuns=()):
         logging.debug("Recording object init()")
         self.parentSession = parentSessionObject
         self.recordingFilePath = (
@@ -191,14 +192,16 @@ class Recording(object):
         SCOPE_SENSOR_TRANSFORM_POSITION_IN_HIERARCHY = 2
         # Replace the single transform at each appropriate location with the full sequence of
         # sensor transforms loaded from the recording file
-        transformsList[
-            HEAD_SENSOR_TRANSFORM_POSITION_IN_HIERARCHY
-        ] = headSensorTransforms
-        transformsList[
-            SCOPE_SENSOR_TRANSFORM_POSITION_IN_HIERARCHY
-        ] = scopeSensorTransforms
+        transformsList[HEAD_SENSOR_TRANSFORM_POSITION_IN_HIERARCHY] = (
+            headSensorTransforms
+        )
+        transformsList[SCOPE_SENSOR_TRANSFORM_POSITION_IN_HIERARCHY] = (
+            scopeSensorTransforms
+        )
         # Find sequence of positions/orientations using the t
-        positions, orientations = positions_from_transform_hierarchy(transformsList)
+        positions, orientationsZ, orientationsX = positions_from_transform_hierarchy(
+            transformsList
+        )
         # Break this sequence into separate runs
         runsData = identifyTrackingRunsFromRawPath(
             positions, segmentationNode, airwayZoneSegmentName
@@ -209,9 +212,12 @@ class Recording(object):
         for runData in runsData:
             runData = np.array(runData)
             runPositions = positions[runData, :]
-            runOrientations = orientations[runData, :]
+            runOrientationsZ = orientationsZ[runData, :]
+            runOrientationsX = orientationsX[runData, :]
             runTimeStamps = timeStamps[runData]  # timeStamps is 1-D
-            scopeRun = ScopeRun(None, runTimeStamps, runPositions, runOrientations)
+            scopeRun = ScopeRun(
+                None, runTimeStamps, runPositions, runOrientationsZ, runOrientationsX
+            )
             scopeRuns.append(scopeRun)
         return scopeRuns
 
@@ -278,12 +284,15 @@ class Recording(object):
 
 
 class ScopeRun(object):
-    def __init__(self, parentRecordingObject, timeStamps, positions, orientations):
+    def __init__(
+        self, parentRecordingObject, timeStamps, positions, orientationsZ, orientationsX
+    ):
         logging.debug("ScopeRun object init()")
         self.parentRecording = parentRecordingObject
         self.timeStamps = timeStamps
         self.positions = positions
-        self.orientations = orientations
+        self.orientationsZ = orientationsZ
+        self.orientationsX = orientationsX
         self.coneModel = None
         self.tubeModel = None
         self.userName = None
@@ -299,11 +308,12 @@ class ScopeRun(object):
             (
                 self.timeStamps.reshape(len(self.timeStamps), 1),
                 self.positions,
-                self.orientations,
+                self.orientationsZ,
+                self.orientationsX,
             ),
             axis=1,
         )
-        header_string = "JSON formatted list of run data. [timeStamp, pos_R, pos_A, pos_S, ori_R, ori_A, ori_S]"
+        header_string = "JSON formatted list of run data. [timeStamp, pos_R, pos_A, pos_S, oriZ_R, oriZ_A, oriZ_S, oriX_R, oriX_A, oriX_S]"
         array_json = json.dumps(arr.tolist())
         saveDataText = "\n".join([header_string, array_json])
 
@@ -330,7 +340,7 @@ class ScopeRun(object):
         if self.positions is None or len(self.positions) < 1:
             raise (Exception("Can't create model node without positions!"))
         self.coneModel, self.tubeModel = modelNodesFromPositionsAndOrientations(
-            self.positions, self.orientations, scalars=None, sizeFactor=3.0
+            self.positions, self.orientationsZ, scalars=None, sizeFactor=3.0
         )
         if not show:
             self.hideModelNodes()
@@ -424,30 +434,56 @@ def positions_from_transform_hierarchy(transformsList):
     ), "All transforms supplied must have either a single frame or the same number of frames!"
     # Calculate positions from the sequence of transforms
     positions = np.zeros((numFrames, 3))
-    orientations = np.zeros((numFrames, 3))
-    origin = np.zeros((4))
-    origin[3] = 1  # homogenous coordinate for a point
-    direction = np.zeros((4))
-    direction[2] = 1  # [0,0,1,0]
-    direction[3] = 0  # homogenous coord for a vector
+    orientationsZ = np.zeros((numFrames, 3))
+    orientationsX = np.zeros((numFrames, 3))
+    # origin = np.zeros((4))
+    # origin[3] = 1  # homogenous coordinate for a point
+    # forwardDirection = np.zeros((4))
+    # forwardDirection[2] = 1  # [0,0,1,0]
+    # forwardDirection[3] = 0  # homogenous coord for a vector
     concatTransforms = []
     for frameNum in range(numFrames):
         # Assemble the correct list of transforms for this frame
         currentTransformList = []
-        for listIdx in range(len(transformsList)):
+        for listIdx, transformsListItem in enumerate(transformsList):
             if numFramesPer[listIdx] == 1:
-                curTransform = transformsList[listIdx]
+                curTransform = transformsListItem
             else:
-                curTransform = transformsList[listIdx][:, :, frameNum]
+                curTransform = transformsListItem[:, :, frameNum]
             currentTransformList.append(curTransform)
         # Apply tranforms in order to origin position
         concatTransform = np.linalg.multi_dot(currentTransformList)
+        # Read position and orientation directions from concatenated transform
+        currentPosition = concatTransform[0:3, 3]
+        currentOrientationZ = concatTransform[0:3, 2]  # forward=+Z
+        currentOrientationX = concatTransform[0:3, 1]  # normal (related to camera up)
+        # Z = X x Y ; Z x X = Y, so
+        # currentOrientationY = Z x X  (vector cross products)
         concatTransforms.append(concatTransform)
-        currentPosition4 = concatTransform @ origin
-        currentOrientation4 = concatTransform @ direction
-        positions[frameNum, :] = currentPosition4[0:3]
-        orientations[frameNum, :] = currentOrientation4[0:3]
-    return positions, orientations
+        #
+        # currentPosition4 = concatTransform @ origin
+        # currentOrientation4 = concatTransform @ forwardDirection
+        positions[frameNum, :] = currentPosition[:]
+        orientationsZ[frameNum, :] = currentOrientationZ[:]
+        orientationsX[frameNum, :] = currentOrientationX[:]
+    return positions, orientationsZ, orientationsX
+
+
+def buildConcatTransform4x4FromPosOriZOriX(position, oriZ, oriX):
+    """Rebuild the concatenated transform from a position, forward vector (z-axis), and
+    the x transverse vector (x-axis).
+    """
+    # Normalize the input orientation vectors to unit length (just in case)
+    oriZ = oriZ / np.linalg.norm(oriZ)
+    oriX = oriX / np.linalg.norm(oriX)
+    oriY = np.cross(oriZ, oriX)
+    # Concatenated transform
+    concatTransform = np.eye(4)
+    concatTransform[0, 0:3] = oriX
+    concatTransform[1, 0:3] = oriY
+    concatTransform[2, 0:3] = oriZ
+    concatTransform[3, 0:3] = position
+    return concatTransform
 
 
 def identifyTrackingRunsFromRawPath(

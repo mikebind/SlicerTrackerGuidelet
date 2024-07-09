@@ -153,10 +153,12 @@ SEPTUM_ZONE_COLOR = (0.5647, 0.9333, 0.5647)
 # TEST_ZONE_MODEL_STL = os.path.join(segDir, "testSoundZone.stl")
 # Sound Paths
 soundDir = os.path.join(moduleDir, "Resources", "Sounds")
-COUGH_SOUND_PATH = pathlib.Path(soundDir, "cough1.wav")
-GAG_SOUND_PATH = pathlib.Path(soundDir, "gag1.wav")  # or gag2.wav
-SEPTUM_SOUND_PATH = pathlib.Path(soundDir, "OwMySeptum.wav")
-OUCH2_SOUND_PATH = pathlib.Path(soundDir, "Ow.wav")
+COUGH_SOUND_PATH = pathlib.Path(soundDir, "cough1_Edit.wav")
+GAG_SOUND_PATH = pathlib.Path(
+    soundDir, "KaalanGagSound.wav"
+)  # or KaalanProlongedGagging.wav
+SEPTUM_SOUND_PATH = pathlib.Path(soundDir, "OwMySeptumV2.wav")
+OUCH2_SOUND_PATH = pathlib.Path(soundDir, "OwThatHurts.wav")
 MOUTH_SOUND_PATH = pathlib.Path(soundDir, "Mouth.wav")
 RIGHT_NOSTRIL_SOUND_PATH = pathlib.Path(soundDir, "RightNostril.wav")
 TEST_SOUND_PATH = pathlib.Path(soundDir, "testZoneSound.wav")
@@ -294,7 +296,7 @@ class ExampleGuideletLogic(GuideletLogic):
             "testParameter": "DoesThisShowUp?",
             "defaultSoundDistanceThresholdMm": "2.0",
             "septumZoneSoundDistThreshMm": "2.0",
-            "ouch2ZoneSoundDistThreshMm": "1.0",
+            "ouch2ZoneSoundDistThreshMm": "2.0",
             "gagZoneSoundDistThreshMm": "3.0",
             "coughZoneSoundDistThreshMm": "2.0",
         }
@@ -769,15 +771,18 @@ class ExampleGuideletGuidelet(Guidelet):
                     "RecordingFilenameExtension"
                 )
                 userName = self.parameterNode.GetParameter("CurrentUserText")
-                userExp = self.parameterNode.GetParameter(
-                    "CurrentUserExperienceLevelText"
-                )
-                userRole = self.parameterNode.GetParameter("CurrentUserRoleText")
+                # userExp = self.parameterNode.GetParameter(
+                #    "CurrentUserExperienceLevelText"
+                # )
+                # userRole = self.parameterNode.GetParameter("CurrentUserRoleText")
                 timeStamp = time.strftime(r"%Y-%m-%d-%H%M%S")
-                self.recordingFileName = f"{recordPrefix}{userName}-{userExp}-{userRole}-{timeStamp}{recordExt}".replace(
-                    " ", "_"
-                )  # replace spaces with underscores
+                # self.recordingFileName = f"{recordPrefix}{userName}-{userExp}-{userRole}-{timeStamp}{recordExt}".replace(
+                #    " ", "_"
+                # )  # replace spaces with underscores
                 # self.recordingFileName =  recordPrefix + time.strftime("%Y%m%d-%H%M%S") + recordExt
+                self.recordingFileName = (
+                    f"{recordPrefix}{userName}-{timeStamp}{recordExt}".replace(" ", "_")
+                )  # replace spaces with underscores
 
                 logging.info(
                     "Starting recording to: {0}".format(self.recordingFileName)
@@ -982,6 +987,30 @@ class ExampleGuideletGuidelet(Guidelet):
             # testZoneModel = slicer.util.loadModel(TEST_ZONE_MODEL_STL)
             # pn.SetNodeReferenceID("testZoneModel", testZoneModel.GetID())
             # pn.SetParameter("testZoneSoundPath", TEST_SOUND_PATH.as_posix())
+
+            ## HIDE the zone models for the bootcamp
+            zoneModelNodes = [
+                coughZoneModel,
+                gagZoneModel,
+                septumZoneModel,
+                ouch2ZoneModel,
+            ]
+            for node in zoneModelNodes:
+                node.GetDisplayNode().SetVisibility(0)
+            # Load the segmentation node and hide all but the airway lumen
+            segNode = slicer.util.loadSegmentation(
+                pathlib.Path(segDir2024F, "Final2024_Seg_1mm.seg.nrrd")
+            )
+            segmentIDList = segNode.GetSegmentation().GetSegmentIDs()
+            segNamesToShow = ["AirwayLumen"]
+            for segID in segmentIDList:
+                segName = segNode.GetSegmentation().GetSegment(segID).GetName()
+                if segName in segNamesToShow:
+                    segNode.GetDisplayNode().SetSegmentVisibility(segID, 1)
+                else:
+                    segNode.GetDisplayNode().SetSegmentVisibility(segID, 0)
+            segNode.GetDisplayNode().SetOpacity3D(0.5)
+
         elif using2024PracticeScan:
             #
             imageNode = slicer.util.loadVolume(AIRWAY_PRACTICE_2024_IMAGE)
