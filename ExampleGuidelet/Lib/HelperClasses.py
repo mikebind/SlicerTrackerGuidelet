@@ -356,6 +356,76 @@ class ScopeRun(object):
         self.tubeModel.GetDisplayNode().SetVisibility(False)
 
 
+class OLD_ScopeRun(object):
+    # This is a copy of the old format for scopeRuns, before orientationX was being included
+    def __init__(self, parentRecordingObject, timeStamps, positions, orientations):
+        logging.debug("ScopeRun object init()")
+        self.parentRecording = parentRecordingObject
+        self.timeStamps = timeStamps
+        self.positions = positions
+        self.orientations = orientations
+        self.coneModel = None
+        self.tubeModel = None
+        self.userName = None
+
+    def setParentRecordingObject(self, parentRecordingObject):
+        logging.debug("ScopeRun.setParentRecordingObject()")
+        self.parentRecording = parentRecordingObject
+
+    def getSaveDataText(self):
+        # organize data into saveable text format
+        # Concatenate matrices to a 7-col array with timstamps, then positions, then orientations
+        arr = np.concatenate(
+            (
+                self.timeStamps.reshape(len(self.timeStamps), 1),
+                self.positions,
+                self.orientations,
+            ),
+            axis=1,
+        )
+        header_string = "JSON formatted list of run data. [timeStamp, pos_R, pos_A, pos_S, ori_R, ori_A, ori_S]"
+        array_json = json.dumps(arr.tolist())
+        saveDataText = "\n".join([header_string, array_json])
+
+        # TODO make this a better format (csv?)
+        # sections = []
+        # sections.append('\nPostions:')
+        # positions_string = np.array2string(self.positions)
+        # sections.append(positions_string)
+        # sections.append('\nOrientations:')
+        # ori_string = np.array2string(self.orientations)
+        # sections.append(ori_string)
+        # sections.append('\nTimeStamps:')
+        # timeStampsCol = self.timeStamps.reshape((len(self.timeStamps), 1)) # reformat to one number per column
+        # tstamp_string = np.array2string(timeStampsCol)
+        # sections.append(tstamp_string)
+        # saveDataText = "\n".join(sections)
+        return saveDataText
+
+    def saveToFile(self, saveDir):
+        logging.debug("ScopeRun.saveToFile()")
+
+    def createModelNodes(self, show=False):
+        logging.debug("ScopeRun.createModelNode()")
+        if self.positions is None or len(self.positions) < 1:
+            raise (Exception("Can't create model node without positions!"))
+        self.coneModel, self.tubeModel = modelNodesFromPositionsAndOrientations(
+            self.positions, self.orientations, scalars=None, sizeFactor=3.0
+        )
+        if not show:
+            self.hideModelNodes()
+
+    def showModelNodes(self):
+        logging.debug("ScopeRun.showModelNodes()")
+        self.coneModel.GetDisplayNode().SetVisibility(True)
+        self.tubeModel.GetDisplayNode().SetVisibility(True)
+
+    def hideModelNodes(self):
+        logging.debug("ScopeRun.hideModelNodes()")
+        self.coneModel.GetDisplayNode().SetVisibility(False)
+        self.tubeModel.GetDisplayNode().SetVisibility(False)
+
+
 ## Helper functions not tied to a class or instance
 
 
