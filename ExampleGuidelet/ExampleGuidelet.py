@@ -25,7 +25,13 @@ import logging
 import time
 import numpy as np
 import Lib.HelperClasses  # allows access to methods outside of the classes
-from Lib.HelperClasses import Session, Recording, ScopeRun, ProgressObj
+from Lib.HelperClasses import (
+    Session,
+    Recording,
+    ScopeRun,
+    ProgressObj,
+    getWaveFileDuration,
+)
 
 
 # Lib.HelperClasses.loadOnlyScopeRunsFromSessionFile()
@@ -619,6 +625,7 @@ class ExampleGuideletGuidelet(Guidelet):
         # Cough
         coughZoneModel = pn.GetNodeReference("coughZoneModel")
         coughSoundPath = pathlib.Path(pn.GetParameter("coughSoundPath"))
+        coughSoundDuration = getWaveFileDuration(coughSoundPath)
         coughDistThresh = float(pn.GetParameter("coughZoneSoundDistThreshMm"))
         coughBreachNode, coughObsInfo = self.logic.setupBreachSound(
             coughSoundPath,
@@ -633,6 +640,7 @@ class ExampleGuideletGuidelet(Guidelet):
         # Gag
         gagZoneModel = pn.GetNodeReference("gagZoneModel")
         gagSoundPath = pathlib.Path(pn.GetParameter("gagSoundPath"))
+        gagSoundDuration = getWaveFileDuration(gagSoundPath)
         gagDistThresh = float(pn.GetParameter("gagZoneSoundDistThreshMm"))
         gagBreachNode, gagObsInfo = self.logic.setupBreachSound(
             gagSoundPath,
@@ -647,6 +655,7 @@ class ExampleGuideletGuidelet(Guidelet):
         # Septum
         septumZoneModel = pn.GetNodeReference("septumZoneModel")
         septumSoundPath = pathlib.Path(pn.GetParameter("septumSoundPath"))
+        septumSoundDuration = getWaveFileDuration(septumSoundPath)
         septumDistThresh = float(pn.GetParameter("septumZoneSoundDistThreshMm"))
         septumBreachNode, septumObsInfo = self.logic.setupBreachSound(
             septumSoundPath,
@@ -661,6 +670,7 @@ class ExampleGuideletGuidelet(Guidelet):
         # OuchZone2 (straight back poke with tip)
         ouch2ZoneModel = pn.GetNodeReference("ouch2ZoneModel")
         ouch2SoundPath = pathlib.Path(pn.GetParameter("ouch2SoundPath"))
+        ouch2SoundDuration = getWaveFileDuration(ouch2SoundPath)
         ouch2DistThresh = float(pn.GetParameter("ouch2ZoneSoundDistThreshMm"))
         ouch2BreachNode, ouch2ObsInfo = self.logic.setupBreachSound(
             ouch2SoundPath,

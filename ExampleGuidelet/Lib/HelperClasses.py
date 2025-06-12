@@ -733,6 +733,19 @@ import matplotlib.dates as mdates
 
 
 # MARK: FUNCTIONS
+import pathlib
+
+
+def getWaveFileDuration(waveFilePath: pathlib.Path):
+    import wave
+
+    with wave.open(waveFilePath.as_posix(), "r") as wavFile:
+        frames = wavFile.getnframes()
+        rate = wavFile.getframerate()
+        duration = frames / float(rate)
+    return duration
+
+
 def calcVelocity(positions, timeStamps, halfWindow, halfWindowUnits="n"):
     # Force points to be in columns
     if positions.shape[0] != 3:
