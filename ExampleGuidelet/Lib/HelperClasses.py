@@ -5,6 +5,39 @@ import numpy as np
 import json
 import re
 import slicer, vtk
+from typing import List, Tuple
+import scipy
+
+
+"""
+General Overview
+---------------- 
+Session objects are associated with each time the Save User Info button 
+is clicked.  Each recording is processed and added to the current session 
+upon stopping.  The guidelet saves the session to disk after every recording
+completion. 
+While in memory, a Session object keeps track of a list of Recording objects.
+When loaded from a file, these objects are not reconstituted, and the 
+listOfRecordings property is just empty (I think). 
+
+When a recording is stopped, the Recording object processes the raw data
+into individual scope runs, using recording file and the current transform
+hierarchy to generate raw path data, and then the 
+identifyTrackingRunsFromRawPath function to divide the raw path into segments
+which represent individual scope runs.  The basic criteria used is that a scope
+run is composed of a position which is inside the airwayZone segment plus all 
+points neighboring time points which are also inside the airwayZone segment or 
+which leave the airwayZone segment for fewer than 11 consecutive timepoints.  
+Also, if the identified run length is less then the minimum of 30 consecutive
+time points, it is also discarded. 
+
+Therefore, the processing to scope runs should do a good job of weeding out
+stretches of time where the scope tip is not actually in or very near the airway.
+Also, it should not be thrown off by an isolated errant point location.  Beyond 
+that, it should leave all location data intact.  Specifically, it doesn't do 
+anything like progress fraction filtering, that's all further along in the processing
+stream. Scope runs are intended to be pretty raw data. 
+"""
 
 
 class Session(object):
@@ -64,6 +97,15 @@ class Session(object):
         self.savedFilePathName = saveFilePathName
 
     def getSaveFileText(self):
+        """Save file text has a header section, then zero or more
+        recording sections, each of which can contain zero or more
+        scope run sections.
+        Recording sections have a recording file path line,
+        a list of transform hierarchy names line,
+        and then a list of transform matrices
+        Scope run sections have a header line ("JSON formatted list of run data. [timeStamp, pos_R,..."),
+        and then a line with all of the time, position, oriZ and oriX data
+        """
         logging.debug("Session.getSaveFileText()")
         headerTextList = [
             self.userDataDict["userName"]
@@ -139,6 +181,8 @@ class Recording(object):
     def processRecordingToScopeRuns(
         self,
         sceneLeafTransformNode,
+        progressObj: "ProgressObj",
+        zoneTuples: Tuple[Tuple],
         segmentationNode,
         airwayZoneSegmentName="airwayZone",
     ):
@@ -158,6 +202,17 @@ class Recording(object):
         for scopeRun in scopeRuns:
             scopeRun.setParentRecordingObject(self)
         self.listOfScopeRuns = scopeRuns
+        # Analyze each run
+        self.analyzeScopeRuns(progressObj, zoneTuples)
+
+    def analyzeScopeRuns(self, progressObj, zoneTuples):
+        """Run quantitative analysis on each scope run"""
+        # NOTE: the zone analysis currently requires that the Slicer
+        # scene is loaded and the ZONE_TUPLES constants are current. Probably
+        # should refactor so these are inputs, maybe guidelet widget or logic
+        # property?
+        for scopeRun in self.listOfScopeRuns:
+            scopeRun.analyze(progressObj, zoneTuples)
 
     def getTransformsInfoString(self):
         transform_names_str = json.dumps(self.transformsNames)
@@ -172,7 +227,7 @@ class Recording(object):
         sceneLeafTransformNode,
         segmentationNode,
         airwayZoneSegmentName="airwayZone",
-    ):
+    ) -> List["ScopeRun"]:
         logging.debug("Recording.processRecordingFileToScopeRuns()")
         logging.info(
             f"  Processing {recordingFilePath}...\n   Using {sceneLeafTransformNode.GetName()} as transform leaf\n   Using {segmentationNode.GetName()} as segmentation\n"
@@ -283,6 +338,17 @@ class Recording(object):
         return timeStamps, headSensorTransforms, scopeSensorTransforms
 
 
+ADVANCING_PHASE_MAX_THRESH = 0.6  # Set this at epiglottis? 0.5? mid-trachea 0.65?
+# OK, want to quantify times for phases which are not just the whole advancing time or whole withdrawal time
+# It looks like ScopeRunPhase can likely already handle this, just by modifying the start and max frac threshes
+#
+POSTERIOR_NASOPHARYNX_PROGFRAC = 0.33  # Could plausibly be anywhere 0.31 to 0.4
+EPIGLOTTIS_PROGFRAC = (
+    0.47  # 0.46? 0.5 would mean definitely navigated past the epiglottis
+)
+START_RUN_PROGFRAC = -0.05  # change from 0.1 to capture nasal sill navigation time
+
+
 class ScopeRun(object):
     def __init__(
         self, parentRecordingObject, timeStamps, positions, orientationsZ, orientationsX
@@ -332,6 +398,62 @@ class ScopeRun(object):
         # saveDataText = "\n".join(sections)
         return saveDataText
 
+    def analyze(self, progObj: "ProgressObj", zoneTuples: Tuple[Tuple]):
+        """Run quant analysis of scope run"""
+        self.progressFracs = progObj.findProgressFractionsForScopeRun(self)
+        self.validate()
+        if self.valid:
+            # Continue analysis
+            speed, velocity = calcVelocity(self.positions, self.timeStamps, 15, "n")
+            anglesDeg, cats = findOriToVelocityAngles(self.orientationsZ, velocity)
+            self.speeds = speed
+            self.velocities = velocity
+            self.anglesDeg = anglesDeg
+            self.angleCats = cats  # categorization of  angle
+            advPhase = ScopeRunPhase(
+                self, advancingFlag=True, maxFracThresh=ADVANCING_PHASE_MAX_THRESH
+            )
+            nasalPhase = ScopeRunPhase(
+                self,
+                advancingFlag=True,
+                maxFracThresh=POSTERIOR_NASOPHARYNX_PROGFRAC,
+                startFracThresh=START_RUN_PROGFRAC,
+            )
+            pharynxPhase = ScopeRunPhase(
+                self,
+                advancingFlag=True,
+                maxFracThresh=EPIGLOTTIS_PROGFRAC,
+                startFracThresh=POSTERIOR_NASOPHARYNX_PROGFRAC,
+            )
+            # Withdrawal phase (just quantify time?)
+            wdrPhase = ScopeRunPhase(
+                self,
+                advancingFlag=False,
+                advPhase=False,
+            )
+            phasesToAnalyze = [advPhase, nasalPhase, pharynxPhase]
+            for phase in phasesToAnalyze:
+                phase.runPauseAnalysis()
+                phase.runZoneAnalysis(zoneTuples=zoneTuples)
+        else:
+            # invalid scope run, do we want to do any reporting or
+            # messaging here?
+            pass
+
+    def validate(self, requiredMaxProgress=0.5, requiredStartProgress=0.1):
+        """Mark scope run as valid if the run starts at or before the
+        required start progress fraction, and if the maximum progress during
+        the run is greater than or equal to the required maximum progress.
+        Invalid runs will not be analyzed like valid runs (though some
+        analysis of why they are invalid may be carried out and reported).
+        """
+        validFlag = True
+        if np.max(self.progressFracs) < requiredMaxProgress:
+            validFlag = False
+        if self.progressFracs[0] > requiredStartProgress:
+            validFlag = False
+        self.valid = validFlag
+
     def saveToFile(self, saveDir):
         logging.debug("ScopeRun.saveToFile()")
 
@@ -354,6 +476,184 @@ class ScopeRun(object):
         logging.debug("ScopeRun.hideModelNodes()")
         self.coneModel.GetDisplayNode().SetVisibility(False)
         self.tubeModel.GetDisplayNode().SetVisibility(False)
+
+
+class ProgressObj(object):
+    def __init__(self, progressCurveNode, startFinishFiducialNode):
+        startPointLoc = startFinishFiducialNode.GetNthControlPointPositionWorld(0)
+        finishPointLoc = startFinishFiducialNode.GetNthControlPointPositionWorld(1)
+        startIdx = findClosestControlPointIdx(startPointLoc, progressCurveNode)
+        finishIdx = findClosestControlPointIdx(finishPointLoc, progressCurveNode)
+        idxsRaw = np.array(range(progressCurveNode.GetNumberOfControlPoints()))
+        progressFractions = (idxsRaw - startIdx) / (finishIdx - startIdx)
+        self.curveNode = progressCurveNode
+        self.fractions = progressFractions
+
+    def findProgressFractionsForScopeRun(self, scopeRun):
+        positions = scopeRun.positions
+        progressFractions = np.zeros(positions.shape[0])  # pre-allocate with zeros
+        for posIdx, pos in enumerate(positions):
+            progressIdx = findClosestControlPointIdx(pos, self.curveNode)
+            progressFractions[posIdx] = self.fractions[progressIdx]
+        return progressFractions
+
+    def __repr__(self):
+        return f"ProgressObj object\n  curveNode: {self.curveNode.GetName()}\n  fractions: {self.fractions.shape} array "
+
+
+class ScopeRunPhase(object):
+    def __init__(
+        self,
+        parentScopeRun: ScopeRun,
+        advancingFlag: bool,
+        maxFracThresh=0.9,
+        startFracThresh=0.1,
+    ):
+        self.parentScopeRun = parentScopeRun
+        mask = np.full(parentScopeRun.timeStamps.shape, False)  # initialize
+        if not parentScopeRun.valid:
+            raise Exception(
+                "Input ScopeRun object is not valid! Cancelling creation of ScopeRunPhase."
+            )
+        maxProgressIdx = np.argmax(parentScopeRun.progressFracs)
+        if advancingFlag:
+            self.phaseType = "advancing"
+            mask = np.logical_and(
+                parentScopeRun.progressFracs >= startFracThresh,
+                parentScopeRun.progressFracs <= maxFracThresh,
+            )
+            mask[maxProgressIdx + 1 :] = False
+            mask3 = np.column_stack((mask, mask, mask))
+            numEntries = np.count_nonzero(mask)
+        else:
+            self.phaseType = "withdrawing"
+            mask = np.logical_and(
+                parentScopeRun.progressFracs >= startFracThresh,
+                parentScopeRun.progressFracs <= maxFracThresh,
+            )
+            mask[:maxProgressIdx] = False
+            mask3 = np.column_stack((mask, mask, mask))
+            numEntries = np.count_nonzero(mask)
+        self.timeStamps = parentScopeRun.timeStamps[mask] - parentScopeRun.timeStamps[0]
+        self.progressFracs = parentScopeRun.progressFracs[mask]
+        self.positions = parentScopeRun.positions[mask3].reshape(numEntries, 3)
+        self.orientationsZ = parentScopeRun.orientationsZ[mask3].reshape(numEntries, 3)
+        self.speeds = parentScopeRun.speeds[mask]
+        self.anglesDeg = parentScopeRun.anglesDeg[mask]
+        self.angleCats = parentScopeRun.angleCats[mask]
+
+    def duration(self):
+        return self.timeStamps[-1] - self.timeStamps[0]
+
+    def runPauseAnalysis(
+        self, pauseThreshSec=2, minProgVeloc=0.001, backtrackProgThresh=0.01
+    ):
+        """Carries out identification of pauses and backtrack events for
+        this ScopeRun.  Pauses are times when the net advancement over
+        at least pauseThreshSec falls behind the minProgVelocity advancement
+        rate. Backtrack events are when the current progress fraction falls
+        behind the maximum progress so far by at least backtrackProgThresh.
+        """
+        self.pauseIdxArray = findPauses2(
+            self, pauseThreshSec, minProgVeloc, showFlag=False
+        )
+        self.nPauses = self.pauseIdxArray.shape[0]
+        self.pauseDurations = findPauseDurations(self.pauseIdxArray, self.timeStamps)
+        (
+            self.nBacktrackEvents,
+            self.backtrackEventDepths,
+            self.backtrackEventMaxDepthIdxs,
+        ) = findBacktrackEvents(self, backtrackProgThresh=backtrackProgThresh)
+
+    def quickPlot(self):
+        plt.plot(self.timeStamps - self.timeStamps[0], self.progressFracs)
+        plt.xlabel("Time (sec)")
+        plt.ylabel("Progress Fraction")
+        plt.show()
+
+    def runZoneAnalysis(self, zoneTuples):
+        # Run an analysis of when the trajectory comes too close (in contact with)
+        # zones representing places of particular irritation for patients.  When
+        # sound production is on, touching these areas triggers an audible reaction
+        # by playing a sound file.
+        self.zoneAnalysisDict = dict()
+        for displayName, zoneModelNode, triggerDist, soundDuration in zoneTuples:
+            zoneModelName = zoneModelNode.GetName()
+            self.zoneAnalysisDict[displayName] = ZoneAnalysisObj(
+                self, zoneModelNode, triggerDist, soundDuration
+            )
+
+
+defaultSoundDuration = 3.0  # sec
+ZONE_TUPLES = (
+    ("Septum", slicer.util.getNode("SeptumZoneTrimmed"), 2.00, defaultSoundDuration),
+    ("Nasopharynx", slicer.util.getNode("OuchZone2"), 3.00, defaultSoundDuration),
+    ("Epiglottis", slicer.util.getNode("GagZone"), 3.00, defaultSoundDuration),
+    ("Trachea", slicer.util.getNode("CoughZoneTrimmed"), 2.00, defaultSoundDuration),
+)
+
+
+class ZoneAnalysisObj:
+    def __init__(
+        self, parent, zoneModelNode, triggerThreshDistanceMm, soundDelaySec=3.0
+    ):
+        self.parent = parent
+        self.zoneModelNode = zoneModelNode
+        self.triggerThreshDistanceMm = triggerThreshDistanceMm
+        self.soundDelaySec = soundDelaySec
+        self.runZoneAnalysis()
+
+    def runZoneAnalysis(self):
+        # Run (or re-run) zone analysis
+        # For a sound trigger zone, we can associate every time point with a distance
+        # to the closest point in the model, as well as a flag for whether this is
+        # below the trigger threshold for contact/sound production.  For summarizing
+        # purposes, we could record:
+        #   the closest approach (minimum distance to each zone)
+        #   total time spent in contact (below thresh)
+        #   contact durations (contiguous times)
+        #   number of sounds triggered (tricky because of sound duration dependence?)
+        #   number of zones triggered (max 4?)
+        # Might also be interesting to record the places that are scraped? (i.e. closest
+        # points when below threshold).
+        self.rawZoneDists = distanceFromModel(self.parent.positions, self.zoneModelNode)
+        self.adjZoneDists = self.rawZoneDists - self.triggerThreshDistanceMm
+        self.contactFlags = self.adjZoneDists <= 0
+        self.stepDurations = calcStepDurations(self.parent.timeStamps)
+        self.contactDurations, self.contactIdxArray = calcZoneContactDurations(
+            self.contactFlags, self.stepDurations
+        )
+        self.totalContactDuration = np.sum(self.contactDurations)
+        self.minimumZoneDistance = np.min(self.adjZoneDists)
+        # Sound trigger count (factor in forced delay while sound plays)
+        self.soundTriggerIdxs = findSoundTriggerIdxs(
+            self.parent.timeStamps, self.contactFlags
+        )
+        self.nSounds = len(self.soundTriggerIdxs)
+
+    def getSummaryText(self, printMe=True):
+        # Print a summary of the results of the analysis
+        txtLines = [
+            f"Total contact Duration: {self.totalContactDuration:0.2f} sec",
+            f"Number of contacts: {len(self.contactDurations)}",
+            f"Closest approach (adj): {np.min(self.adjZoneDists):0.2f} mm",
+            f"Number of timesteps in contact: {np.sum(self.contactFlags)}",
+        ]
+        txt = "\n".join(txtLines)
+        if printMe:
+            print(txt)
+        return txt
+
+    def getCSVZoneVariables(self):
+        # Return the set of variables which are to be included in the CSV file.
+        # NOTE: THIS MUST BE COORDINATED WITH the generate_CSV function COLUMN HEADERS!!!
+        # zoneVals = (('TotalContactTime', ' (s)'),
+        #       ('ContactSoundCount', ''),
+        #       ('ClosestApproach', ' (mm)'),
+        #       )
+        # Total contact time, number of sound triggers, closest approach
+        outputs = (self.totalContactDuration, self.nSounds, self.minimumZoneDistance)
+        return outputs
 
 
 class OLD_ScopeRun(object):
@@ -427,6 +727,655 @@ class OLD_ScopeRun(object):
 
 
 ## Helper functions not tied to a class or instance
+
+import matplotlib.pyplot as plt
+import matplotlib.dates as mdates
+
+
+# MARK: FUNCTIONS
+def calcVelocity(positions, timeStamps, halfWindow, halfWindowUnits="n"):
+    # Force points to be in columns
+    if positions.shape[0] != 3:
+        positions = positions.T
+    if halfWindowUnits == "n":
+        # Integer number of sampling points
+        posDiff = np.zeros(positions.shape)
+        tsDiff = np.zeros(timeStamps.shape)
+        posDiff[:, halfWindow:-halfWindow] = (
+            positions[:, halfWindow * 2 :] - positions[:, : -halfWindow * 2]
+        )
+        tsDiff[halfWindow:-halfWindow] = (
+            timeStamps[halfWindow * 2 :] - timeStamps[: -halfWindow * 2]
+        )
+        # Handle the points on either end whose window would extend outside the time window of the curve
+        for idx in range(halfWindow):
+            # Beginning
+            posDiff[:, idx] = positions[:, idx + halfWindow] - positions[:, 0]
+            tsDiff[idx] = timeStamps[idx + halfWindow] - timeStamps[0]
+            # End
+            posDiff[:, -1 - idx] = (
+                positions[:, -1] - positions[:, -1 - idx - halfWindow]
+            )
+            tsDiff[-1 - idx] = timeStamps[-1] - timeStamps[-1 - idx - halfWindow]
+        displacementMagnitude = np.linalg.norm(posDiff, axis=0)
+        speed = np.divide(displacementMagnitude, tsDiff)
+        velocityDirection = (
+            posDiff / displacementMagnitude
+        )  # normalize the vectors to have unit length
+        velocityVector = (
+            velocityDirection * speed
+        )  # stretch vectors to have length of the speed
+    elif halfWindowUnits == "sec":
+        # Window in seconds
+        tqForward = timeStamps + halfWindow
+        tqBackward = timeStamps - halfWindow
+        posForward = scipy.interpolate  # need to figure out matlab interp1 equivalent
+    else:
+        raise Exception('halfWindowUnits must be either "n" or "sec"')
+    return speed, velocityVector
+
+
+def findOriToVelocityAngles(orientation, velocity, thresholdAngleDeg=45):
+    # Force vectors into the columns
+    if orientation.shape[0] != 3:
+        orientation = orientation.T
+    if velocity.shape[0] != 3:
+        velocity = velocity.T
+    dotProductVector = np.einsum("ij,ij->j", orientation, velocity)
+    # Find the angle between each orientation vector and each velocity vector
+    anglesRad = np.arctan2(
+        np.linalg.norm(np.cross(orientation, velocity, axis=0), axis=0),
+        dotProductVector,
+    )
+    anglesDeg = 180.0 / np.pi * anglesRad
+    # Categorize these based on the threshold angle into whether the tracked tip is advancing (category=1)
+    # moving laterally (category=0) or withdrawing (category=-1)
+    advancementCategories = np.zeros(anglesDeg.shape)
+    advancementCategories[anglesDeg < thresholdAngleDeg] = 1  # advancing
+    advancementCategories[
+        (anglesDeg >= thresholdAngleDeg) & (anglesDeg <= (180 - thresholdAngleDeg))
+    ] = 0  # lateral
+    advancementCategories[anglesDeg > thresholdAngleDeg] = -1  # retreating/withdrawing
+    return anglesDeg, advancementCategories
+
+
+def showCat(cat, label=None):
+    plt.plot(cat, label=label)
+    plt.show()
+
+
+def calcFrameRate(sr):
+    # Time range
+    timeRange = sr.timeStamps[-1] - sr.timeStamps[0]
+    # Num time intervals
+    numSteps = len(sr.timeStamps) - 1
+    # Frame rate
+    frameRate = numSteps / timeRange  # fps
+    return frameRate
+
+
+def createPhaseCurveNodes(phaseObjList):
+    """Create a markupsCurveNode of positions for the phase, color it by phase type, and display it in Slicer"""
+    advancingColor = [1, 0, 0]
+    withdrawingColor = [0, 0, 1]
+    markupsCurveList = []
+    for listIdx, phaseObj in enumerate(phaseObjList):
+        # Set color and short type tag based on phaseType
+        if phaseObj.phaseType == "advancing":
+            curveColor = advancingColor
+            shortTag = "adv"
+        elif phaseObj.phaseType == "withdrawing":
+            curveColor = withdrawingColor
+            shortTag = "wdr"
+        else:
+            raise Exception(f"Unknown phase type ({phaseObj.phaseType}) encountered!")
+        # Construct node name based on user name and index into fullScopeRuns list (for easier cross-ref)
+        nodeName = f"{phaseObj.parentScopeRun.userName}_{listIdx}_{shortTag}"
+        # Create curve node
+        markupsCurve = slicer.mrmlScene.AddNewNodeByClass(
+            "vtkMRMLMarkupsCurveNode", nodeName
+        )
+        markupsCurve.GetDisplayNode().SetVisibility(
+            0
+        )  # showing all of these slows stuff down a lot, hide by default
+        slicer.util.updateMarkupsControlPointsFromArray(
+            markupsCurve, phaseObj.positions
+        )
+        # Set color
+        markupsCurve.GetDisplayNode().SetSelectedColor(curveColor)
+        # Lock control points so that they can't accidentally be dragged
+        for idx in range(markupsCurve.GetNumberOfControlPoints()):
+            markupsCurve.SetNthControlPointLocked(idx, 1)
+        # Store reference in phaseObj and return
+        phaseObj.curveNode = markupsCurve
+        markupsCurveList.append(markupsCurve)
+    return markupsCurveList
+
+
+def findClosestControlPointIdx(location, markupsNode):
+    """Return the index of the closest control point to the supplied location on the supplied markupsNode"""
+    controlPointsArray = slicer.util.arrayFromMarkupsControlPoints(markupsNode)
+    locationArray = np.array(location).reshape((1, 3))
+    distances = np.linalg.norm(controlPointsArray - locationArray, axis=1)
+    minIdx = np.argmin(distances)
+    return minIdx
+
+
+def calcProgressVelocity(phaseObj, halfWindowN=1):
+    t = phaseObj.timeStamps
+    pf = phaseObj.progressFracs
+    pfDiff = np.zeros(pf.shape)
+    tsDiff = np.zeros(t.shape)
+    pfDiff[halfWindowN:-halfWindowN] = pf[halfWindowN * 2 :] - pf[: -halfWindowN * 2]
+    tsDiff[halfWindowN:-halfWindowN] = t[halfWindowN * 2 :] - t[: -halfWindowN * 2]
+    # handle points on either end by reducing the window size
+    for idx in range(halfWindowN):
+        # beginning
+        pfDiff[idx] = pf[idx + halfWindowN] - pf[0]
+        tsDiff[idx] = t[idx + halfWindowN] - t[0]
+        # end
+        pfDiff[-1 - idx] = pf[-1] - pf[-1 - idx - halfWindowN]
+        tsDiff[-1 - idx] = t[-1] - t[-1 - idx - halfWindowN]
+    progressVelocity = pfDiff / tsDiff
+    return progressVelocity
+
+
+def calcExpectedProgressCurve(timeStamps, progressFrac, minExpectedVelocity):
+    expProgFrac = np.zeros(progressFrac.shape)
+
+    for idx, pf in enumerate(progressFrac):
+        if idx == 0:
+            expProgFrac[idx] = pf
+        else:
+            expDelta = minExpectedVelocity * (timeStamps[idx] - timeStamps[idx - 1])
+            expProgD = expProgFrac[idx - 1] + expDelta
+            # Use the max of the expected progress or the actual progress
+            expProgFrac[idx] = np.max([expProgD, pf])
+    return expProgFrac
+
+
+def calcMaxProgSoFarCurve(progressFracs):
+    # Calculate a curve which is the cumulative maximal progress curve
+    maxProgSoFar = np.zeros(progressFracs.shape)
+    for idx in range(progressFracs.shape[0]):
+        maxProgSoFar[idx] = np.max(progressFracs[: idx + 1])
+    return maxProgSoFar
+
+
+def calcProgressVelocity(phaseObj, halfWindowN=1):
+    t = phaseObj.timeStamps
+    pf = phaseObj.progressFracs
+    pfDiff = np.zeros(pf.shape)
+    tsDiff = np.zeros(t.shape)
+    pfDiff[halfWindowN:-halfWindowN] = pf[halfWindowN * 2 :] - pf[: -halfWindowN * 2]
+    tsDiff[halfWindowN:-halfWindowN] = t[halfWindowN * 2 :] - t[: -halfWindowN * 2]
+    # handle points on either end by reducing the window size
+    for idx in range(halfWindowN):
+        # beginning
+        pfDiff[idx] = pf[idx + halfWindowN] - pf[0]
+        tsDiff[idx] = t[idx + halfWindowN] - t[0]
+        # end
+        pfDiff[-1 - idx] = pf[-1] - pf[-1 - idx - halfWindowN]
+        tsDiff[-1 - idx] = t[-1] - t[-1 - idx - halfWindowN]
+    progressVelocity = pfDiff / tsDiff
+    return progressVelocity
+
+
+def calcExpectedProgressCurve(timeStamps, progressFrac, minExpectedVelocity):
+    expProgFrac = np.zeros(progressFrac.shape)
+
+    for idx, pf in enumerate(progressFrac):
+        if idx == 0:
+            expProgFrac[idx] = pf
+        else:
+            expDelta = minExpectedVelocity * (timeStamps[idx] - timeStamps[idx - 1])
+            expProgD = expProgFrac[idx - 1] + expDelta
+            # Use the max of the expected progress or the actual progress
+            expProgFrac[idx] = np.max([expProgD, pf])
+    return expProgFrac
+
+
+def calcMaxProgSoFarCurve(progressFracs):
+    # Calculate a curve which is the cumulative maximal progress curve
+    maxProgSoFar = np.zeros(progressFracs.shape)
+    for idx in range(progressFracs.shape[0]):
+        maxProgSoFar[idx] = np.max(progressFracs[: idx + 1])
+    return maxProgSoFar
+
+
+def findPauses2(phaseObj, pauseThreshSec=2, minExpectedVelocity=0.001, showFlag=False):
+    """A pause is when the progress curve falls behind the minExpected velocity for
+    at least pauseThreshSec seconds.
+    """
+    ts = phaseObj.timeStamps - phaseObj.timeStamps[0]
+    pfc_orig = phaseObj.progressFracs
+    if phaseObj.phaseType == "withdrawing":
+        pfc = -1 * pfc_orig + 1
+    elif phaseObj.phaseType == "advancing":
+        pfc = pfc_orig
+    mpc = calcMaxProgSoFarCurve(pfc)
+    epc = calcExpectedProgressCurve(ts, pfc, minExpectedVelocity)
+    curveDiff = epc - mpc
+    allPauseMask = curveDiff > 0
+    allPauseLabels, nLabels = scipy.ndimage.label(allPauseMask)
+    # Throw out any pauses shorter than pauseThreshSec
+    validPauses = []
+    for pauseLabel in range(1, nLabels + 1):
+        thisPauseIdxs = np.flatnonzero(allPauseLabels == pauseLabel)
+        startIdx = thisPauseIdxs[0]
+        lastIdx = thisPauseIdxs[-1]
+        pauseDuration = ts[lastIdx] - ts[startIdx]
+        if pauseDuration >= pauseThreshSec:
+            validPauses.append([startIdx, lastIdx + 1])
+    pauseIdxArray = np.array(validPauses, dtype=int)
+    # Optionally show the identified pauses
+    if showFlag:
+        plt.plot(ts, pfc_orig, linewidth=0.5)
+        for pauseStartIdx, pauseStopIdx in pauseIdxArray:
+            plt.plot(
+                ts[pauseStartIdx:pauseStopIdx],
+                pfc_orig[pauseStartIdx:pauseStopIdx],
+                linewidth=2,
+            )
+        plt.show()
+    return pauseIdxArray
+
+
+# Idea for findPauses3: instead of the max progress so far having infinite backwards memory,
+# change this to a time window, say the maximum value in the last 5 sec. That is a way
+# To avoid the excessive hill-climing after a long pause.
+
+
+def findBacktrackEvents(phaseObj, backtrackProgThresh=0.01):
+    pfc_orig = phaseObj.progressFracs
+    if phaseObj.phaseType == "advancing":
+        pfc = pfc_orig
+    elif phaseObj.phaseType == "withdrawing":
+        # Flip and shift
+        pfc = -1 * pfc_orig + 1
+    mpc = calcMaxProgSoFarCurve(pfc)
+    curveDiff = mpc - pfc
+    mask = curveDiff > backtrackProgThresh
+    labelMap, nBacktrackEvents = scipy.ndimage.label(mask)
+    # For each label, find the point of maximum backtracking
+    eventDepths = np.zeros((nBacktrackEvents))
+    eventMaxDepthIdxs = np.zeros((nBacktrackEvents), dtype=int)
+    for eventIdx, label in enumerate(range(1, nBacktrackEvents + 1)):
+        labelMask = labelMap == label
+        labelMaskIdxs = np.flatnonzero(labelMask)
+        depths = curveDiff[labelMask]
+        maxDepth = np.max(depths)
+        maxDepthIdxIntoLabelMask = np.argmax(depths)
+        labelMaskIdxs = np.flatnonzero(labelMask)
+        maxDepthIdx = labelMaskIdxs[maxDepthIdxIntoLabelMask]
+        eventDepths[eventIdx] = maxDepth
+        eventMaxDepthIdxs[eventIdx] = maxDepthIdx
+    return nBacktrackEvents, eventDepths, eventMaxDepthIdxs
+
+
+def addGridLines():
+    # experimenting with adding background grid to plots
+    plt.grid(which="major")  # both')
+    # plt.grid(which='minor',linewidth=0.25)
+    plt.grid(which="major", linewidth=0.5)
+    xlimits = plt.xlimits
+    # plt.minorticks_on()
+
+
+def findPauseDurations(pauseIdxArray, ts):
+    pauseDurations = np.zeros((pauseIdxArray.shape[0]))
+    for idx, (start, stop) in enumerate(pauseIdxArray):
+        pauseDurations[idx] = ts[stop - 1] - ts[start]
+    return pauseDurations
+
+
+def fancyPlot(sr, idx=None):
+    # Show full curve with 0.5 thickness
+    t = sr.timeStamps
+    pf = sr.progressFracs
+    plt.plot(t - t[0], pf, linewidth=0.5)
+    # Show phases as thicker parts of curve
+    advPhase = ScopeRunPhase(sr, True)
+    ta = advPhase.timeStamps
+    pfa = advPhase.progressFracs
+    prop_cycle = plt.rcParams["axes.prop_cycle"]
+    colors = prop_cycle.by_key()["color"]
+    plt.plot(ta, pfa, color=colors[0], linewidth=1.5)  # match the color
+    #
+    wPhase = ScopeRunPhase(sr, False)
+    tw = wPhase.timeStamps
+    pfw = wPhase.progressFracs
+    plt.plot(tw, pfw, color=colors[0])
+    # Show pauses in color overlays
+    advPhase.runPauseAnalysis()
+    for pauseStartIdx, pauseStopIdx in advPhase.pauseIdxArray:
+        plt.plot(
+            ta[pauseStartIdx:pauseStopIdx],
+            pfa[pauseStartIdx:pauseStopIdx],
+            linewidth=2.5,
+        )
+    wPhase.runPauseAnalysis()
+    for pauseStartIdx, pauseStopIdx in wPhase.pauseIdxArray:
+        plt.plot(
+            tw[pauseStartIdx:pauseStopIdx],
+            pfw[pauseStartIdx:pauseStopIdx],
+            linewidth=2.5,
+        )
+    # Add backtracking event points
+    plt.plot(
+        ta[advPhase.backtrackEventMaxDepthIdxs],
+        pfa[advPhase.backtrackEventMaxDepthIdxs],
+        linestyle="",
+        marker="o",
+        markerfacecolor="None",
+        color=colors[9],
+    )
+    plt.plot(
+        tw[wPhase.backtrackEventMaxDepthIdxs],
+        pfw[wPhase.backtrackEventMaxDepthIdxs],
+        linestyle="",
+        marker="o",
+        markerfacecolor="None",
+        color=colors[9],
+    )
+
+    # Grid
+    addGridLines()
+    # Title
+    plt.title(f"{sr.userName}{' (Run %i)'%idx if idx else ''}")
+    plt.xlabel("Time (s)")
+    plt.ylabel("Progress Fraction")
+    return plt
+
+
+def fancyPlot2(sr, idx=None):
+    """This is an updated version to more closely match the look of 2024 bootcamp figures"""
+    # Show full curve with 0.5 thickness
+    t = sr.timeStamps
+    pf = sr.progressFracs
+    plt.plot(t - t[0], pf, linewidth=0.5)
+    # Show phases as thicker parts of curve
+    advPhase = ScopeRunPhase(sr, True)
+    ta = advPhase.timeStamps
+    pfa = advPhase.progressFracs
+    prop_cycle = plt.rcParams["axes.prop_cycle"]
+    colors = prop_cycle.by_key()["color"]
+    plt.plot(ta, pfa, color=colors[0], linewidth=1.5)  # match the color
+    #
+    wPhase = ScopeRunPhase(sr, False)
+    tw = wPhase.timeStamps
+    pfw = wPhase.progressFracs
+    plt.plot(tw, pfw, color=colors[0])
+    # Show pauses in color overlays
+    pauseLineWidth = 2.0
+    pauseColor = "gray"
+    pauseOffset = 0.05  # amount to shift the pause line from the progress fraction line
+    advPhase.runPauseAnalysis()
+    wPhase.runPauseAnalysis()
+
+    for pauseStartIdx, pauseStopIdx in advPhase.pauseIdxArray:
+        pauseTs = ta[pauseStartIdx:pauseStopIdx]
+        pauseY = pfa[pauseStartIdx] + pauseOffset
+        pauseYs = np.full(pauseTs.shape, pauseY)
+        plt.plot(pauseTs, pauseYs, linewidth=pauseLineWidth, color=pauseColor)
+    for pauseStartIdx, pauseStopIdx in wPhase.pauseIdxArray:
+        pauseTs = tw[pauseStartIdx:pauseStopIdx]
+        pauseY = pfw[pauseStartIdx] + pauseOffset
+        pauseYs = np.full(pauseTs.shape, pauseY)
+        plt.plot(pauseTs, pauseYs, linewidth=pauseLineWidth, color=pauseColor)
+    # Add backtracking event points
+    plt.plot(
+        ta[advPhase.backtrackEventMaxDepthIdxs],
+        pfa[advPhase.backtrackEventMaxDepthIdxs],
+        linestyle="",
+        marker="v",
+        markerfacecolor="None",
+        color=colors[9],
+    )
+    plt.plot(
+        tw[wPhase.backtrackEventMaxDepthIdxs],
+        pfw[wPhase.backtrackEventMaxDepthIdxs],
+        linestyle="",
+        marker="v",
+        markerfacecolor="None",
+        color=colors[9],
+    )
+
+    # Grid
+    addGridLines()
+    # Title
+    plt.title(f"{sr.userName}{' (Run %i)'%idx if idx else ''}")
+    plt.xlabel("Time (s)")
+    plt.ylabel("Progress Fraction")
+    return plt
+
+
+def fancyPlot3(sr, idx=None):
+    """For figures for Anna with changes from fancyPlot2 to show backtracking triangles
+    in red and make them larger.
+    """
+    # Show full curve with 0.5 thickness
+    t = sr.timeStamps
+    pf = sr.progressFracs
+    plt.plot(t - t[0], pf, linewidth=0.5)
+    # Show phases as thicker parts of curve
+    advPhase = ScopeRunPhase(sr, True)
+    ta = advPhase.timeStamps
+    pfa = advPhase.progressFracs
+    prop_cycle = plt.rcParams["axes.prop_cycle"]
+    colors = prop_cycle.by_key()["color"]
+    plt.plot(ta, pfa, color=colors[0], linewidth=1.5)  # match the color
+    #
+    wPhase = ScopeRunPhase(sr, False)
+    tw = wPhase.timeStamps
+    pfw = wPhase.progressFracs
+    plt.plot(tw, pfw, color=colors[0])
+    # Show pauses in color overlays
+    pauseLineWidth = 2.0
+    pauseColor = "gray"
+    pauseOffset = 0.05  # amount to shift the pause line from the progress fraction line
+    advPhase.runPauseAnalysis()
+    wPhase.runPauseAnalysis()
+
+    for pauseStartIdx, pauseStopIdx in advPhase.pauseIdxArray:
+        pauseTs = ta[pauseStartIdx:pauseStopIdx]
+        pauseY = pfa[pauseStartIdx] + pauseOffset
+        pauseYs = np.full(pauseTs.shape, pauseY)
+        plt.plot(pauseTs, pauseYs, linewidth=pauseLineWidth, color=pauseColor)
+    for pauseStartIdx, pauseStopIdx in wPhase.pauseIdxArray:
+        pauseTs = tw[pauseStartIdx:pauseStopIdx]
+        pauseY = pfw[pauseStartIdx] + pauseOffset
+        pauseYs = np.full(pauseTs.shape, pauseY)
+        plt.plot(pauseTs, pauseYs, linewidth=pauseLineWidth, color=pauseColor)
+    # Add backtracking event points
+    backtrackMarkerColor = "red"
+    backtrackOffset = 0.05
+    plt.plot(
+        ta[advPhase.backtrackEventMaxDepthIdxs],
+        pfa[advPhase.backtrackEventMaxDepthIdxs] + backtrackOffset,
+        linestyle="",
+        marker="v",
+        markerfacecolor=backtrackMarkerColor,
+        color=backtrackMarkerColor,
+        markersize=5,
+    )
+    plt.plot(
+        tw[wPhase.backtrackEventMaxDepthIdxs],
+        pfw[wPhase.backtrackEventMaxDepthIdxs] + backtrackOffset,
+        linestyle="",
+        marker="v",
+        markerfacecolor=backtrackMarkerColor,
+        color=backtrackMarkerColor,
+        markersize=5,
+    )
+
+    # Grid
+    addGridLines()
+    # Title
+    plt.title(f"{sr.userName}{' (Run %i)'%idx if idx else ''}")
+    plt.xlabel("Time (s)")
+    plt.ylabel("Progress Fraction")
+    return plt
+
+
+def fancyPlot4(sr, idx=None):
+    """Final figures for Anna with changes from fancyPlot3 to adjust
+    ticks, force same xlim extent.
+    """
+    # Show full curve with 0.5 thickness
+    t = sr.timeStamps
+    pf = sr.progressFracs
+    plt.plot(t - t[0], pf, linewidth=0.5)
+    # Show phases as thicker parts of curve
+    advPhase = ScopeRunPhase(sr, True)
+    ta = advPhase.timeStamps
+    pfa = advPhase.progressFracs
+    prop_cycle = plt.rcParams["axes.prop_cycle"]
+    colors = prop_cycle.by_key()["color"]
+    plt.plot(ta, pfa, color=colors[0], linewidth=1.5)  # match the color
+    #
+    wPhase = ScopeRunPhase(sr, False)
+    tw = wPhase.timeStamps
+    pfw = wPhase.progressFracs
+    plt.plot(tw, pfw, color=colors[0])
+    # Show pauses in color overlays
+    pauseLineWidth = 2.0
+    pauseColor = "gray"
+    pauseOffset = 0.05  # amount to shift the pause line from the progress fraction line
+    advPhase.runPauseAnalysis()
+    wPhase.runPauseAnalysis()
+
+    for pauseStartIdx, pauseStopIdx in advPhase.pauseIdxArray:
+        pauseTs = ta[pauseStartIdx:pauseStopIdx]
+        pauseY = pfa[pauseStartIdx] + pauseOffset
+        pauseYs = np.full(pauseTs.shape, pauseY)
+        plt.plot(pauseTs, pauseYs, linewidth=pauseLineWidth, color=pauseColor)
+    for pauseStartIdx, pauseStopIdx in wPhase.pauseIdxArray:
+        pauseTs = tw[pauseStartIdx:pauseStopIdx]
+        pauseY = pfw[pauseStartIdx] + pauseOffset
+        pauseYs = np.full(pauseTs.shape, pauseY)
+        plt.plot(pauseTs, pauseYs, linewidth=pauseLineWidth, color=pauseColor)
+    # Add backtracking event points
+    backtrackMarkerColor = "red"
+    backtrackOffset = 0.05
+    plt.plot(
+        ta[advPhase.backtrackEventMaxDepthIdxs],
+        pfa[advPhase.backtrackEventMaxDepthIdxs] + backtrackOffset,
+        linestyle="",
+        marker="v",
+        markerfacecolor=backtrackMarkerColor,
+        color=backtrackMarkerColor,
+        markersize=5,
+    )
+    plt.plot(
+        tw[wPhase.backtrackEventMaxDepthIdxs],
+        pfw[wPhase.backtrackEventMaxDepthIdxs] + backtrackOffset,
+        linestyle="",
+        marker="v",
+        markerfacecolor=backtrackMarkerColor,
+        color=backtrackMarkerColor,
+        markersize=5,
+    )
+
+    # Limits
+    plt.xlim(0, 125)
+    plt.ylim(0, 1)
+    # Grid
+    # experimenting with adding background grid to plots
+    plt.grid(which="major")  # both')
+    # plt.grid(which='minor',linewidth=0.25)
+    plt.grid(which="major", linewidth=0.5)
+    xlimits = plt.xlim()
+    xGridStepSize = 10
+    plt.xticks(np.arange(0, xlimits[1], xGridStepSize))
+    yGridStepSize = 0.1
+    ylimits = plt.ylim()
+    plt.yticks(np.arange(0, ylimits[1] + 0.01, yGridStepSize))
+    # Title
+    plt.title(f"{sr.userName}{' (Run %i)'%idx if idx else ''}")
+    plt.xlabel("Time (s)")
+    plt.ylabel("Progress Fraction")
+    return plt
+
+
+r"""To make the poster plot for Anna's poster, she chose the two subjects she
+wanted to show, then I manually pulled code from the bootcamp2024.py script
+and the TrackerCurveAnalysisExploration.ipynb to load the session files
+and construct the trajectories. (Load into ScopeRun, generate new
+ScopeRunPhase, do most of the steps in the early bootcamp2024.py script
+to generate progress fractions and advancing phase with custom endpoints,
+then show trajectory via updateMarkupsControlPointsFromArray for a
+new curve markup node and sr.positions as the array. Finally, adjust 
+display properties and hide all points except every 15th one (frame rate
+is relatively consistent at 15 fps). Saved in 
+C:\Users\mike.bindschadler@seattlechildrens.org\OneDrive - SCH\Airway4D\Temp\TrackerFiles
+\2024\ToShare\AfterBootCampSceneSave\AnnaPosterTrajectories.mrb)
+"""
+
+
+def fancyPlot5(advPhase, savePath=None):
+    """Final figures for Anna's poster with changes from fancyPlot4 to adjust
+    ticks, force same xlim extent.
+    """
+    # Show full curve with 0.5 thickness
+    # t = sr.timeStamps
+    # pf = sr.progressFracs
+    # plt.plot(t-t[0], pf, linewidth=0.5)
+    # Show phases as thicker parts of curve
+    # advPhase = ScopeRunPhase(sr, True)
+    ta = advPhase.timeStamps
+    pfa = advPhase.progressFracs
+    prop_cycle = plt.rcParams["axes.prop_cycle"]
+    colors = prop_cycle.by_key()["color"]
+    fig, ax = plt.subplots()
+    ax.plot(ta, pfa, color=colors[0], linewidth=1.5)  # match the color
+
+    # Show pauses in color overlays
+    pauseLineWidth = 2.0
+    pauseColor = "gray"
+    pauseOffset = 0.05  # amount to shift the pause line from the progress fraction line
+    advPhase.runPauseAnalysis()
+
+    for pauseStartIdx, pauseStopIdx in advPhase.pauseIdxArray:
+        pauseTs = ta[pauseStartIdx:pauseStopIdx]
+        pauseY = pfa[pauseStartIdx] + pauseOffset
+        pauseYs = np.full(pauseTs.shape, pauseY)
+        ax.plot(pauseTs, pauseYs, linewidth=pauseLineWidth, color=pauseColor)
+    # Add backtracking event points
+    backtrackMarkerColor = "red"
+    backtrackOffset = 0.05
+    ax.plot(
+        ta[advPhase.backtrackEventMaxDepthIdxs],
+        pfa[advPhase.backtrackEventMaxDepthIdxs] + backtrackOffset,
+        linestyle="",
+        marker="v",
+        markerfacecolor=backtrackMarkerColor,
+        color=backtrackMarkerColor,
+        markersize=5,
+    )
+
+    # Limits
+    ax.set_xlim(0, 51)
+    ax.set_ylim(0, 0.55)
+    # Grid
+    # experimenting with adding background grid to plots
+    ax.grid(which="major")  # both')
+    # plt.grid(which='minor',linewidth=0.25)
+    ax.grid(which="major", linewidth=0.5)
+    xlimits = ax.get_xlim()
+    xGridStepSize = 10
+    ax.set_xticks(np.arange(0, xlimits[1], xGridStepSize))
+    yGridStepSize = 0.1
+    ylimits = ax.set_ylim()
+    ax.set_yticks(np.arange(0, ylimits[1] + 0.01, yGridStepSize))
+    # Title
+    # ax.set_title(f"{sr.userName}{' (Run %i)'%idx if idx else ''}")
+    ax.set_xlabel("Time (s)")
+    ax.set_ylabel("Progress Fraction")
+    if savePath:
+        fig.savefig(savePath)
+        plt.close(fig)
+    return fig
 
 
 def loadAllScopeRunsFromDirectory(dirName):

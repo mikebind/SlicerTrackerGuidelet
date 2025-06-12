@@ -12,6 +12,7 @@ from slicer import (
     vtkMRMLTransformNode,
     vtkMRMLLinearTransformNode,
 )
+import slicer.util
 
 from SlicerGuideletBase import (
     GuideletLoadable,
@@ -24,7 +25,8 @@ import logging
 import time
 import numpy as np
 import Lib.HelperClasses  # allows access to methods outside of the classes
-from Lib.HelperClasses import Session, Recording, ScopeRun
+from Lib.HelperClasses import Session, Recording, ScopeRun, ProgressObj
+
 
 # Lib.HelperClasses.loadOnlyScopeRunsFromSessionFile()
 
@@ -95,6 +97,7 @@ class ExampleGuideletWidget(GuideletWidget):
         return ExampleGuideletLogic()
 
 
+# MARK: CONTSTANTS
 HEAD_SENSOR_TRANSFORM_POSITION_IN_HIERARCHY = 1
 SCOPE_SENSOR_TRANSFORM_POSITION_IN_HIERARCHY = 2
 DEFAULT_LEAF_TRANSFORM_NODE_NAME = "Extra"
@@ -162,6 +165,14 @@ OUCH2_SOUND_PATH = pathlib.Path(soundDir, "OwThatHurts.wav")
 MOUTH_SOUND_PATH = pathlib.Path(soundDir, "Mouth.wav")
 RIGHT_NOSTRIL_SOUND_PATH = pathlib.Path(soundDir, "RightNostril.wav")
 TEST_SOUND_PATH = pathlib.Path(soundDir, "testZoneSound.wav")
+
+# For ProgressObj creation
+PROGRESS_REFERENCE_CURVE_PATH = pathlib.Path(
+    segDir, "ProgressReferenceCurve_2024BootCamp.mrk.json"
+)
+NOSE_CARINA_POINTS_PATH = pathlib.Path(
+    segDir, "NoseCarinaEndpoints_2024BootCamp.mrk.json"
+)
 
 
 # MARK: ExampleGuideletLogic
@@ -449,7 +460,8 @@ class ExampleGuideletGuidelet(Guidelet):
         self.scopeRunsDisplayed = []  # initalize, no runs showing right now
 
         # Set up sounds to be able to play as warnings
-        self.setupSounds()
+        self.zoneTuples = self.setupZoneSounds()
+        self.logic: ExampleGuideletLogic
 
     def updateParameterNodeFromGuideletGUI(self, caller=None, event=None):
         """Update parameter node values from current GUI information"""
@@ -596,7 +608,7 @@ class ExampleGuideletGuidelet(Guidelet):
         # self.exampleButton.connect('clicked(bool)', self.onExampleButtonClicked)
         # TODO: Ensure disconnect() has all matching disconnections
 
-    def setupSounds(self):
+    def setupZoneSounds(self):
         """Set up all sounds which should be triggered by touching airway
         walls in certain places.  Create QSoundEffect resources and
         link them to models and distance thresholds.
@@ -668,6 +680,13 @@ class ExampleGuideletGuidelet(Guidelet):
         # )
         # pn.SetNodeReferenceID("testBreachNode", testBreachNode.GetID())
         # self.zoneModelObserversList.append(testObsInfo)
+        zoneTuples = (
+            ("Septum", septumZoneModel, septumDistThresh, septumSoundDuration),
+            ("Nasopharynx", ouch2ZoneModel, ouch2DistThresh, ouch2SoundDuration),
+            ("Epiglottis", gagZoneModel, gagDistThresh, gagSoundDuration),
+            ("Trachea", coughZoneModel, coughDistThresh, coughSoundDuration),
+        )
+        return zoneTuples
 
     def onLiveUpdateCheckBoxToggled(self, tf: bool):
         """Toggle whether live updating is occuring"""
@@ -836,7 +855,11 @@ class ExampleGuideletGuidelet(Guidelet):
                     )
                 # Process the recording now that the file is available
                 newRecording.processRecordingToScopeRuns(
-                    leafTransformNode, airwayZoneSegmentationNode, "airwayZone"
+                    leafTransformNode,
+                    self.progressObj,
+                    self.zoneTuples,
+                    airwayZoneSegmentationNode,
+                    "airwayZone",
                 )
                 logging.debug(
                     f"Processed new recording to {len(newRecording.listOfScopeRuns)} runs"
@@ -1010,6 +1033,17 @@ class ExampleGuideletGuidelet(Guidelet):
                 else:
                     segNode.GetDisplayNode().SetSegmentVisibility(segID, 0)
             segNode.GetDisplayNode().SetOpacity3D(0.5)
+            # Zone analysis requires set up of zoneTuples
+            self.zoneTuples
+
+            ## Build the progress object (load curve and ref points)
+            progressRefCurveNode = slicer.util.loadMarkupsCurve(
+                PROGRESS_REFERENCE_CURVE_PATH
+            )
+            noseCarinaPointsNode = slicer.util.loadMarkupsFiducialList(
+                NOSE_CARINA_POINTS_PATH
+            )
+            self.progressObj = ProgressObj(progressRefCurveNode, noseCarinaPointsNode)
 
         elif using2024PracticeScan:
             #
