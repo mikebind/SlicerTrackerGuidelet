@@ -24,6 +24,7 @@ from SlicerGuideletBase import Guidelet
 import logging
 import time
 import numpy as np
+import Lib
 import Lib.HelperClasses  # allows access to methods outside of the classes
 from Lib.HelperClasses import (
     Session,
@@ -1043,16 +1044,13 @@ class ExampleGuideletGuidelet(Guidelet):
                 else:
                     segNode.GetDisplayNode().SetSegmentVisibility(segID, 0)
             segNode.GetDisplayNode().SetOpacity3D(0.5)
-            # Zone analysis requires set up of zoneTuples
-            self.zoneTuples
+            # NOTE: zoneTuples is built later
 
             ## Build the progress object (load curve and ref points)
             progressRefCurveNode = slicer.util.loadMarkupsCurve(
                 PROGRESS_REFERENCE_CURVE_PATH
             )
-            noseCarinaPointsNode = slicer.util.loadMarkupsFiducialList(
-                NOSE_CARINA_POINTS_PATH
-            )
+            noseCarinaPointsNode = slicer.util.loadMarkups(NOSE_CARINA_POINTS_PATH)
             self.progressObj = ProgressObj(progressRefCurveNode, noseCarinaPointsNode)
 
         elif using2024PracticeScan:
@@ -1116,7 +1114,7 @@ class ExampleGuideletGuidelet(Guidelet):
         except slicer.util.MRMLNodeNotFoundException:
             # Conclude we are in testing mode for now
             slicer.util.errorDisplay(
-                "Expected transform not found, running it test/debug mode!"
+                "Expected transform not found, running it test/debug mode with dummy transforms!"
             )
             # Create a dummy tip transform named "Extra"
             self.ExtraTransform = self.createTransformNode(
@@ -1126,11 +1124,85 @@ class ExampleGuideletGuidelet(Guidelet):
                 "sceneLeafTransformNode", self.ExtraTransform.GetID()
             )
             self.leafTransformNodeSelector.setCurrentNodeID(self.ExtraTransform.GetID())
-            return  # return early since the rest of the method will fail
+            # Set up dummy example transforms (so that gatherTransformsFromTransformHierarchy()
+            # will work OK)
+            tformNames = [
+                "HeadSensorTo2024Fina",
+                "EmTrackerToHeadSenso",
+                "StylusSensorToEmTrac",
+                "NeedleTipToStylusSen",
+            ]
+            tformMatrices = [
+                [
+                    [
+                        0.06600320339202881,
+                        0.9978169798851013,
+                        -0.0021609601099044085,
+                        -10.285699844360352,
+                    ],
+                    [
+                        0.8004800081253052,
+                        -0.05424249917268753,
+                        -0.5968999862670898,
+                        -206.21600341796875,
+                    ],
+                    [
+                        -0.5957139730453491,
+                        0.03766750171780586,
+                        -0.8023130297660828,
+                        195.48199462890625,
+                    ],
+                    [0.0, 0.0, 0.0, 1.0],
+                ],
+                [
+                    [0.5712890625, 0.054931640625, -0.81884765625, -116.70484161376953],
+                    [-0.0234375, 0.9984130859375, 0.0506591796875, 14.855034828186035],
+                    [
+                        0.8201904296875,
+                        -0.0098876953125,
+                        0.57177734375,
+                        -178.40003967285156,
+                    ],
+                    [0.0, 0.0, 0.0, 1.0],
+                ],
+                [
+                    [
+                        0.010680790059268475,
+                        -0.47149407863616943,
+                        0.8819272518157959,
+                        317.3387756347656,
+                    ],
+                    [
+                        0.9995076060295105,
+                        -0.025898708030581474,
+                        -0.025886470451951027,
+                        335.53302001953125,
+                    ],
+                    [
+                        0.03519517183303833,
+                        0.8815362453460693,
+                        0.47091665863990784,
+                        -292.00079345703125,
+                    ],
+                    [0.0, 0.0, 0.0, 1.0],
+                ],
+                [
+                    [0.0, 0.0, 1.0, 0.0],
+                    [1.0, 0.0, 0.0, 0.0],
+                    [0.0, 1.0, 0.0, 0.0],
+                    [0.0, 0.0, 0.0, 1.0],
+                ],
+            ]
+            for name, matrix in zip(tformNames, tformMatrices):
+                T = slicer.mrmlScene.AddNewNodeByClass(
+                    "vtkMRMLLinearTransformNode", name
+                )
+                slicer.util.updateTransformMatrixFromArray(T, np.array(matrix))
+
+            # return  # return early since the rest of the method will fail
 
         self.EmTrackerToHeadSensor = slicer.util.getNode("EmTrackerToHeadSenso")
         self.StylusSensorToEmTracker = slicer.util.getNode("StylusSensorToEmTrac")
-        self.StylusTipToStylusSensor = slicer.util.getNode("StylusTipToStylusSen")
         self.NeedleTipToStylusSensor = slicer.util.getNode("NeedleTipToStylusSen")
         if usingPegNeckHead:
             # self.HeadSensorToHeadSTL = slicer.util.getNode('HeadSensorToPegHeadS')
@@ -1192,6 +1264,7 @@ class ExampleGuideletGuidelet(Guidelet):
             self.needleModel.SetAndObserveTransformNodeID(self.ExtraTransform.GetID())
         else:
             # Using stylus sensor (plastic)
+            self.StylusTipToStylusSensor = slicer.util.getNode("StylusTipToStylusSen")
             self.needleModel.SetAndObserveTransformNodeID(
                 self.StylusTipToStylusSensor.GetID()
             )

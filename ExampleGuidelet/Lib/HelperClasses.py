@@ -5,7 +5,7 @@ import numpy as np
 import json
 import re
 import slicer, vtk
-from typing import List, Tuple
+from typing import List, Tuple, Optional
 import scipy
 
 
@@ -201,6 +201,12 @@ class Recording(object):
         )
         for scopeRun in scopeRuns:
             scopeRun.setParentRecordingObject(self)
+            try:
+                scopeRun.userName = self.parentSession.userDataDict["userName"]
+            except:
+                # OK to fail silently here, I think, just means no parent session
+                # or no userName
+                pass
         self.listOfScopeRuns = scopeRuns
         # Analyze each run
         self.analyzeScopeRuns(progressObj, zoneTuples)
@@ -411,7 +417,10 @@ class ScopeRun(object):
             self.anglesDeg = anglesDeg
             self.angleCats = cats  # categorization of  angle
             advPhase = ScopeRunPhase(
-                self, advancingFlag=True, maxFracThresh=ADVANCING_PHASE_MAX_THRESH
+                self,
+                advancingFlag=True,
+                maxFracThresh=ADVANCING_PHASE_MAX_THRESH,
+                startFracThresh=START_RUN_PROGFRAC,
             )
             nasalPhase = ScopeRunPhase(
                 self,
@@ -429,16 +438,104 @@ class ScopeRun(object):
             wdrPhase = ScopeRunPhase(
                 self,
                 advancingFlag=False,
-                advPhase=False,
+                maxFracThresh=ADVANCING_PHASE_MAX_THRESH,
+                startFracThresh=START_RUN_PROGFRAC,
             )
             phasesToAnalyze = [advPhase, nasalPhase, pharynxPhase]
             for phase in phasesToAnalyze:
                 phase.runPauseAnalysis()
                 phase.runZoneAnalysis(zoneTuples=zoneTuples)
+            # Store results in scopeRun
+            self.advPhase = advPhase
+            self.nasalPhase = nasalPhase
+            self.pharynxPhase = pharynxPhase
+            self.wdrPhase = wdrPhase
         else:
             # invalid scope run, do we want to do any reporting or
             # messaging here?
             pass
+
+    def generateAnalysisReportText(self):
+        """Create analysis report (text)"""
+        if not self.valid:
+            # Abbreviated text
+            txt = f"Not a valid scope run:\nMaximum progress fraction was {np.max(self.progressFracs):0.2f} (>0.5 required)\nStarting progress fraction {self.progressFracs[0]:0.2f} (<0.1 required)"
+            return txt
+        # Otherwise, valid run, make normal report
+        lines = []
+        indent = "   "
+        lines.append(f"Advancing duration: {self.advPhase.duration() :0.1f} s")
+        lines.append(
+            f"{indent}Nasal Phase duration: {self.nasalPhase.duration() :0.1f} s"
+        )
+        lines.append(
+            f"{indent}Pharyngeal Phase duration: {self.pharynxPhase.duration() :0.1f} s"
+        )
+        lines.append("Undesirable anatomical contacts (#, duration)")
+        zaDict = self.advPhase.zoneAnalysisDict
+        for zoneName, za in zaDict.items():
+            nSounds = za.nSounds
+            totalContactTime = za.totalContactDuration
+            lines.append(
+                f"{indent}{zoneName}: {nSounds} contact{'' if nSounds==1 else 's'}, {totalContactTime:0.1f} s total contact time"
+            )
+        lines.append(f"Withdrawal duration: {self.wdrPhase.duration() :0.1f} s")
+        # Assemble
+        txt = "\n".join(lines)
+        return txt
+
+    def calcScore(self, minWithdrawalTimeSec=2, maxWithdrawalTimeSec=5):
+        """Calculate score for leaderboard.
+        Basic idea for scoring:
+        10x adv phase time + penalties for contacts, contact duration, and
+        too fast or too slow withdrawal.
+        """
+        if not self.valid:
+            return None, None
+        # Penalty weights
+        timeWeight = 10  # points per second
+        penaltyPerContact = 2 * timeWeight  # 2-second penalty for contact
+        contactTimeWeight = 2 * timeWeight  # contact time counts triple
+        minWithdrawalTime = minWithdrawalTimeSec  # sec
+        tooFastWdrPenalty = 2 * timeWeight  # 2-second penalty for yanking
+        maxWithdrawalTime = maxWithdrawalTimeSec  # sec
+        tooSlowWdrPenalty = 1 * timeWeight  # 1-second penalty for slow-dragging
+        # Gather data
+        advPhaseDuration = self.advPhase.duration()
+        nContactsList = [za.nSounds for za in self.advPhase.zoneAnalysisDict.values()]
+        nTotalContacts = np.sum(nContactsList)
+        totalContactDurationList = [
+            za.totalContactDuration for za in self.advPhase.zoneAnalysisDict.values()
+        ]
+        totalContactDuration = np.sum(totalContactDurationList)
+        wdrDuration = self.wdrPhase.duration()
+        wdrPenalty = 0  # no penalty if within range
+        if wdrDuration < minWithdrawalTime:
+            wdrPenalty = tooFastWdrPenalty
+        elif wdrDuration > maxWithdrawalTime:
+            wdrPenalty = tooSlowWdrPenalty
+        score = (
+            advPhaseDuration * timeWeight
+            + penaltyPerContact * nTotalContacts
+            + contactTimeWeight * totalContactDuration
+            + wdrPenalty
+        )
+        flawlessFlag = (
+            nTotalContacts == 0 and totalContactDuration == 0 and wdrPenalty == 0
+        )
+        score = np.round(score)
+        scoreComponents = {  # quantity, weight
+            "advancingTime": (advPhaseDuration, timeWeight),
+            "contactCountPenalty": (nTotalContacts, penaltyPerContact),
+            "contactTimePenalty": (totalContactDuration, contactTimeWeight),
+            "withdrawalPenalty": (wdrDuration, wdrPenalty),  # time, penalty
+            "flawlessFlag": flawlessFlag,  # just bool
+        }
+        # Store results in scope run and also return them
+        self.score = score
+        self.scoreComponents = scoreComponents
+        self.flawlessFlag = flawlessFlag
+        return score, scoreComponents
 
     def validate(self, requiredMaxProgress=0.5, requiredStartProgress=0.1):
         """Mark scope run as valid if the run starts at or before the
@@ -584,13 +681,13 @@ class ScopeRunPhase(object):
             )
 
 
-defaultSoundDuration = 3.0  # sec
-ZONE_TUPLES = (
-    ("Septum", slicer.util.getNode("SeptumZoneTrimmed"), 2.00, defaultSoundDuration),
-    ("Nasopharynx", slicer.util.getNode("OuchZone2"), 3.00, defaultSoundDuration),
-    ("Epiglottis", slicer.util.getNode("GagZone"), 3.00, defaultSoundDuration),
-    ("Trachea", slicer.util.getNode("CoughZoneTrimmed"), 2.00, defaultSoundDuration),
-)
+# defaultSoundDuration = 3.0  # sec
+# ZONE_TUPLES = (
+#    ("Septum", slicer.util.getNode("SeptumZoneTrimmed"), 2.00, defaultSoundDuration),
+#    ("Nasopharynx", slicer.util.getNode("OuchZone2"), 3.00, defaultSoundDuration),
+#    ("Epiglottis", slicer.util.getNode("GagZone"), 3.00, defaultSoundDuration),
+#    ("Trachea", slicer.util.getNode("CoughZoneTrimmed"), 2.00, defaultSoundDuration),
+# )
 
 
 class ZoneAnalysisObj:
@@ -654,6 +751,45 @@ class ZoneAnalysisObj:
         # Total contact time, number of sound triggers, closest approach
         outputs = (self.totalContactDuration, self.nSounds, self.minimumZoneDistance)
         return outputs
+
+
+class Leaderboard(object):
+    """To keep track of scope run scores.  Should have the ability to display
+    rankings restricting to unique usernames and including duplicate usernames.
+    """
+
+    def __init__(self, listOfScopeRuns=None):
+        self.listOfScopeRuns = listOfScopeRuns or []
+        self.sort()
+
+    def addNewScopeRun(self, sr: ScopeRun):
+        self.listOfScopeRuns.append(sr)
+        self.sort()
+
+    def sort(self):
+        self.listOfScopeRuns.sort(key=lambda sr: sr.score)
+
+    def getTopNResults(self, nResults=10, uniqFlag=True):
+        """Get the top nResults scope runs"""
+        topNList = []
+        userNames = []
+        for sr in self.listOfScopeRuns:
+            if uniqFlag and (sr.userName in userNames):
+                # the better score came first, so safe to skip this one
+                continue
+            userNames.append(sr.userName)
+            topNList.append(sr)
+            if len(topNList) == nResults:
+                break
+        return topNList
+
+    def display(self, nResults=10, uniqFlag=True, currentSr: Optional[ScopeRun] = None):
+        """Show Qt table"""
+        topNList = self.getTopNResults(nResults=nResults, uniqFlag=uniqFlag)
+        show_leaderboard(topNList, currentSr)
+
+    def serialze(self, filePath):
+        pass
 
 
 class OLD_ScopeRun(object):
@@ -1163,6 +1299,126 @@ def fancyPlot2(sr, idx=None):
     return plt
 
 
+def fancyPlot6(sr: ScopeRun, savePath=None, axTitleStr=""):
+    """New version for 2025 bootcamp.  Uses the fact that the phases have
+    already been calculated.
+    """
+    t = sr.timeStamps
+    pf = sr.progressFracs
+    fig, ax = plt.subplots()
+    prop_cycle = plt.rcParams["axes.prop_cycle"]
+    colors = prop_cycle.by_key()["color"]
+    # Show full curve with 0.5 thickness
+    ax.plot(t - t[0], pf, linewidth=0.5, color=colors[0])
+
+    # Show phases as thicker parts of curve
+    advPhase = sr.advPhase
+    ta = advPhase.timeStamps
+    pfa = advPhase.progressFracs
+    ax.plot(ta, pfa, color=colors[0], linewidth=1.5)  # match the color
+    wdrPhase = sr.wdrPhase
+    tw = wdrPhase.timeStamps
+    pfw = wdrPhase.progressFracs
+    ax.plot(tw, pfw, color=colors[0], linewidth=1.0)
+
+    # Show pauses in color overlays
+    pauseLineWidth = 2.0
+    pauseColor = "gray"
+    pauseOffset = 0.05  # amount to shift the pause line from the progress fraction line
+    zoneColors = ((1.0, 0.0, 0.0), (0.0, 1.0, 0.0), (0.0, 0.0, 1.0), (1.0, 0.0, 1.0))
+    zLineWidth = 3.0
+    zShadeBuf = 0.2
+    zSoundOpacity = 0.3
+    contactStartMarkerSize = 5
+    zSoundDuration = 3  # TODO propagate the actual value in here instead of hard coding
+    for pauseStartIdx, pauseStopIdx in advPhase.pauseIdxArray:
+        pauseTs = ta[pauseStartIdx:pauseStopIdx]
+        pauseY = pfa[pauseStartIdx] + pauseOffset
+        pauseYs = np.full(pauseTs.shape, pauseY)
+        ax.plot(pauseTs, pauseYs, linewidth=pauseLineWidth, color=pauseColor)
+    # Add backtracking event points
+    backtrackMarkerColor = "red"
+    backtrackOffset = 0.05
+    ax.plot(
+        ta[advPhase.backtrackEventMaxDepthIdxs],
+        pfa[advPhase.backtrackEventMaxDepthIdxs] + backtrackOffset,
+        linestyle="",
+        marker="v",
+        markerfacecolor=backtrackMarkerColor,
+        color=backtrackMarkerColor,
+        markersize=5,
+    )
+    # Zone Contacts
+    for zoneIdx, (zoneName, za) in enumerate(advPhase.zoneAnalysisDict.items()):
+        for zStartIdx, zStopIdx in za.contactIdxArray:
+            ax.plot(
+                ta[zStartIdx:zStopIdx],
+                pfa[zStartIdx:zStopIdx],
+                linewidth=zLineWidth,
+                color=zoneColors[zoneIdx],
+            )
+            # Add marker at start of contact, with filled middle and black edge
+            ax.plot(
+                ta[zStartIdx],
+                pfa[zStartIdx],
+                marker="d",
+                markerfacecolor=zoneColors[zoneIdx],
+                markeredgecolor="k",
+                markersize=contactStartMarkerSize,
+            )
+
+        for soundStartIdx in za.soundTriggerIdxs:
+            startTime = ta[soundStartIdx]
+            endTime = startTime + zSoundDuration
+            startProgFrac = pfa[soundStartIdx]
+            # ax.fill_between([startTime,endTime],0,1, color=zoneColors[zoneIdx], alpha=0.5,transform=ax.get_xaxis_transform())
+            ax.fill_between(
+                [startTime, endTime],
+                startProgFrac - zShadeBuf,
+                startProgFrac + zShadeBuf,
+                color=zoneColors[zoneIdx],
+                alpha=zSoundOpacity,
+            )
+
+    # Limits
+    # ax.set_xlim(0, 51)
+    # ax.set_ylim(0, 0.55)
+    # Grid
+    # experimenting with adding background grid to plots
+    ax.grid(which="major")  # both')
+    # plt.grid(which='minor',linewidth=0.25)
+    ax.grid(which="major", linewidth=0.5)
+    xlimits = ax.get_xlim()
+    xGridStepSize = 10
+    ax.set_xticks(np.arange(0, xlimits[1], xGridStepSize))
+    yGridStepSize = 0.1
+    # ylimits = ax.get_ylim()
+    # ax.set_yticks(np.arange(0, ylimits[1] + 0.01, yGridStepSize))
+    ax.set_yticks(np.arange(0, 1.0 + 0.01, yGridStepSize))
+    # Title
+    if axTitleStr:
+        ax.set_title(axTitleStr)
+        # ax.set_title(f"{sr.userName}")
+    ax.set_xlabel("Time (s)")
+    ax.set_ylabel("Progress Fraction")
+    # Add 2nd y axis on the right with labeled landmarks
+    atickLabels = ["Nasal Sill", "Choanae", "Epiglottis", "Carina"]
+    aticks = [0.0, POSTERIOR_NASOPHARYNX_PROGFRAC, EPIGLOTTIS_PROGFRAC, 1.0]
+    ax2 = ax.twinx()
+    ax2.set_yticks(aticks)
+    ax2.set_yticklabels(atickLabels)
+    ax2.set_ylabel("Anatomical Progress Landmarks")
+    ax.set_ybound(upper=1.0)
+    ax2.set_ylim(ax.get_ylim())
+
+    fig.set_tight_layout(True)
+
+    if savePath:
+        fig.savefig(savePath)
+        plt.close(fig)
+    return fig
+
+
 def fancyPlot3(sr, idx=None):
     """For figures for Anna with changes from fancyPlot2 to show backtracking triangles
     in red and make them larger.
@@ -1223,7 +1479,17 @@ def fancyPlot3(sr, idx=None):
     )
 
     # Grid
-    addGridLines()
+    # plt.grid(which='minor',linewidth=0.25)
+    plt.grid(which="major", linewidth=0.5)
+    xlimits = plt.xlim()
+    xGridStepSize = 10
+    plt.xticks(np.arange(0, xlimits[1], xGridStepSize))
+    # ax.set_xticks(np.arange(0, xlimits[1], xGridStepSize))
+    yGridStepSize = 0.1
+    ylimits = plt.ylim()  # ax.set_ylim()
+    plt.yticks(np.arange(0, ylimits[1] + 0.01, yGridStepSize))
+    # ax.set_yticks(np.arange(0, ylimits[1] + 0.01, yGridStepSize))
+
     # Title
     plt.title(f"{sr.userName}{' (Run %i)'%idx if idx else ''}")
     plt.xlabel("Time (s)")
@@ -1415,8 +1681,9 @@ def loadOnlyScopeRunsFromSessionFile(filePathName):
                 arr = np.array(json.loads(next(f)))
                 timeStamps = arr[:, 0]
                 positions = arr[:, 1:4]
-                orientations = arr[:, 4:]
-                S = ScopeRun(None, timeStamps, positions, orientations)
+                orientationsZ = arr[:, 4:7]
+                orientationsX = arr[:, 7:]
+                S = ScopeRun(None, timeStamps, positions, orientationsZ, orientationsX)
                 S.userName = userName
                 scopeRunList.append(S)
     return scopeRunList
@@ -1799,3 +2066,329 @@ def modelNodesFromPositionsAndOrientations(
     tubeModel.CreateDefaultDisplayNodes()
     tubeModel.SetPolyDataConnection(tubeFilter.GetOutputPort())
     return coneModel, tubeModel
+
+
+def distanceFromModel(positionArray, modelNode):
+    # Transform model polydata to world coordinate system
+    if modelNode.GetParentTransformNode():
+        transformModelToWorld = vtk.vtkGeneralTransform()
+        slicer.vtkMRMLTransformNode.GetTransformBetweenNodes(
+            modelNode.GetParentTransformNode(), None, transformModelToWorld
+        )
+        polyTransformToWorld = vtk.vtkTransformPolyDataFilter()
+        polyTransformToWorld.SetTransform(transformModelToWorld)
+        polyTransformToWorld.SetInputData(modelNode.GetPolyData())
+        polyTransformToWorld.Update()
+        surface_World = polyTransformToWorld.GetOutput()
+    else:
+        surface_World = modelNode.GetPolyData()
+    # Set up filter
+    distanceFilter = vtk.vtkImplicitPolyDataDistance()
+    distanceFilter.SetInput(surface_World)
+    #
+    distanceArr = np.zeros(positionArray.shape[0])
+    for idx in range(positionArray.shape[0]):
+        distanceArr[idx] = distanceFilter.EvaluateFunction(positionArray[idx, :])
+        # note, if desired, the closest point on the model could also be returned
+        # using EvaluateFunctionAndGetClosestPoint(pt, closestPt)
+    return distanceArr
+
+
+def calcStepDurations(timeStamps):
+    """Calculate step durations in time. The step duration is taken to be the
+    time between the midpoints of the intervals befor and after a step timeStamp.
+    For the first and last timeStamp, the duration is from the endpoint timeStamp
+    to the adjacent midpoint (so typically half as long as other steps). This
+    interval could be doubled if it would make more sense for the durations to be
+    more comparable at the endpoints.
+    """
+    midTimes = (timeStamps[:-1] + timeStamps[1:]) / 2
+    augMidTimes = np.hstack((timeStamps[0], midTimes, timeStamps[-1]))
+    stepDurations = augMidTimes[1:] - augMidTimes[:-1]
+    return stepDurations
+
+
+def calcZoneContactDurations(contactFlags, stepDurations):
+    contactsLabelMap, nContactEvents = scipy.ndimage.label(contactFlags)
+    contactDurations = []
+    contactStartIdxs = []
+    contactEndIdxs = []
+    for labelIdx in range(1, nContactEvents + 1):  # skip background label zero
+        contactMask = contactsLabelMap == labelIdx
+        contactDuration = np.sum(stepDurations[contactMask])
+        contactIdxs = np.flatnonzero(contactMask)
+        contactStartIdx = contactIdxs[0]
+        contactEndIdx = contactIdxs[-1]
+        # Store
+        contactDurations.append(contactDuration)
+        contactStartIdxs.append(contactStartIdx)
+        contactEndIdxs.append(contactEndIdx)
+    return contactDurations, tuple(zip(contactStartIdxs, contactEndIdxs))
+
+
+def findSoundTriggerIdxs(timeStamps, contactFlags, soundDurationSec=3.0):
+    """Find the time stamp indices where playing a sound was triggered
+    (if sounds were on). This takes into account that a sound cannot
+    be repeated until the current instance is completed. (Though I think
+    two different sounds could overlap in time). All sounds for the 2024
+    bootcamp were approx 3 seconds in duration, so I will use that here.
+    """
+    soundTriggerIdxs = []
+    if np.any(contactFlags):
+        contactIdxs = np.flatnonzero(contactFlags)
+        contactTimes = timeStamps[contactFlags]
+        soundStartTime = contactTimes[0]
+        # Store first trigger idx
+        soundTriggerIdxs.append(contactIdxs[0])
+        while np.any(contactTimes > soundStartTime + soundDurationSec):
+            soundStartTime = np.min(
+                contactTimes[contactTimes > soundStartTime + soundDurationSec]
+            )
+            triggerIdx = contactIdxs[contactTimes == soundStartTime][0]
+            soundTriggerIdxs.append(triggerIdx)
+    return soundTriggerIdxs
+
+
+from qt import (
+    QDialog,
+    QVBoxLayout,
+    QTableWidget,
+    QTableWidgetItem,
+    Qt,
+    QColor,
+    QFont,
+    QHeaderView,
+    QSpacerItem,
+    QSizePolicy,
+    QLabel,
+    QPixmap,
+    QTextEdit,
+)
+
+
+def makeScoreQTable(srList: List[ScopeRun], parent: Optional[QDialog] = None):
+    """Make QTableWidget showing score data with one row per scopeRun
+    in the list
+    """
+    table = QTableWidget(len(srList), 6, parent)
+    table.setHorizontalHeaderLabels(
+        [
+            "User",
+            "Score",
+            "Adv Time (s)",
+            "# Contacts",
+            "Contact Time (s)",
+            "Wdr Time (s)",
+        ]
+    )
+    table.setAlternatingRowColors(True)
+
+    # style header
+    header = table.horizontalHeader()
+    header.setSectionResizeMode(0, QHeaderView.Stretch)
+    header.setSectionResizeMode(1, QHeaderView.Stretch)
+    header.setStyleSheet(
+        """
+      QHeaderView::section {
+        background-color: lightgray;
+        font-weight: bold;
+      }
+    """
+    )
+
+    # fill in rows
+    for row, sr in enumerate(srList):
+        # username cell
+        u = QTableWidgetItem(sr.userName)
+        # score cell
+        scoreStr = f"{int(sr.score)} {'*' if sr.flawlessFlag else ''}"
+        s = QTableWidgetItem(scoreStr)
+        # advTime cell
+        advTimeW = QTableWidgetItem(f"{sr.advPhase.duration():0.1f}")
+        # number of contacts cell
+        nContacts = sr.scoreComponents["contactCountPenalty"][0]
+        nContactsW = QTableWidgetItem(f"{nContacts}")
+        # contact time cell
+        contactTime = sr.scoreComponents["contactTimePenalty"][0]
+        contactTimeW = QTableWidgetItem(f"{contactTime:0.1f}")
+        # withdrawal time cell
+        wdrTime = sr.wdrPhase.duration()
+        maxWithdrawalTime = 5
+        minWithdrawalTime = 2
+        if wdrTime > maxWithdrawalTime:
+            extraTxt = " (too slow!)"
+        elif wdrTime < minWithdrawalTime:
+            extraTxt = " (too fast!)"
+        else:
+            extraTxt = ""
+        wdrStr = f"{wdrTime:0.1f}{extraTxt}"
+        wdrW = QTableWidgetItem(wdrStr)
+        # Align cell widgets
+        cellList = [u, s, advTimeW, nContactsW, contactTimeW, wdrW]
+        for w in cellList:
+            w.setTextAlignment(Qt.AlignCenter)
+        # highlight the top entry
+        if row == 0:
+            highlight = QColor(255, 235, 205)  # very light peach
+            for item in cellList:
+                item.setBackground(highlight)
+                f = QFont()
+                f.setBold(True)
+                item.setFont(f)
+        for colIdx, cell in enumerate(cellList):
+            table.setItem(row, colIdx, cell)
+    # ensure rows fit content
+    table.resizeRowsToContents()
+    table.resizeColumnsToContents()
+
+    # Explicitly set table height so that scroll bar doesn't appear
+    tableHeight = (
+        table.horizontalHeader().height
+        + sum(table.rowHeight(r) for r in range(table.rowCount))
+        + 2 * table.frameWidth
+    )
+
+    table.setMinimumHeight(tableHeight)
+    table.setMinimumWidth(table.width)
+    return table
+
+
+def show_leaderboard(srList: List[ScopeRun], currentSr: Optional[ScopeRun] = None):
+    """
+    Pop up a “Leaderboard” dialog with centered text, alternating stripes,
+    a styled header, and the top row highlighted + bolded.
+
+    :param user_list: ordered list of objects, each with .username and .score
+    :return: the QDialog instance (keep a reference so it isn't GC'd)
+    """
+    parent = slicer.util.mainWindow()
+    dlg = QDialog(parent)
+    dlg.setWindowTitle("Leaderboard")
+
+    # main layout
+    layout = QVBoxLayout(dlg)
+
+    if currentSr is not None:
+        # Add a section for the Current Run
+        # Title
+        curLabel = QLabel("Current Trial", dlg)
+        curLabel.setAlignment(Qt.AlignCenter)
+        curLabel.setStyleSheet(
+            "font-size: 12pt; font-weight: bold; font-style: italic; margin-bottom: 5px; margin-top: 5px"
+        )
+        # Report text
+        reportText = currentSr.generateAnalysisReportText()
+        textBox = QTextEdit(dlg)
+        textBox.setReadOnly(True)  # don't allow editing/interaction
+        textBox.setPlainText(reportText)
+        textBox.document.setDocumentMargin(15)
+        textBox.document.adjustSize()  # to trigger update
+        documentHeight = textBox.document.size.height()
+        marginHeight = (
+            textBox.contentsMargins().top() + textBox.contentsMargins().bottom()
+        )
+        textBox.setFixedHeight(int(documentHeight + marginHeight))
+
+        # Plot image
+        newImPath = pathlib.Path(slicer.app.temporaryPath, "TempFancyPlot.png")
+        fancyPlot6(currentSr, newImPath, "Current Trial Progress Plot")
+        plotImg = createImageWidget(newImPath, dlg)
+        # Table (one row for current run)
+        curTable = makeScoreQTable([currentSr], dlg)
+        layout.addWidget(curLabel)
+        layout.addWidget(textBox)
+        layout.addWidget(plotImg)
+        layout.addWidget(curTable)
+        # Calculate height
+        curRunHeight = (
+            curTable.minimumHeight
+            + curLabel.height
+            + plotImg.pixmap.height()
+            + textBox.height
+        )
+
+    else:
+        curRunHeight = 0
+
+    # Title
+    label = QLabel("Current Leaderboard", dlg)
+    label.setAlignment(Qt.AlignCenter)
+    label.setStyleSheet(
+        "font-size: 12pt; font-weight: bold; font-style: italic; margin-bottom: 5px; margin-top: 5px"
+    )
+    # layout.addSpacerItem(QSpacerItem(0, 0, QSizePolicy.Minimum, QSizePolicy.Expanding))
+    layout.addWidget(label)
+    titleHeight = label.height
+
+    # table
+    table = makeScoreQTable(srList, dlg)
+
+    # compute a “just-big-enough” size
+    total_w = (
+        table.verticalHeader().width
+        + sum(table.columnWidth(i) for i in range(table.columnCount))
+        + 2 * table.frameWidth
+    )
+    total_h = table.minimumHeight + titleHeight + curRunHeight
+    # add a little padding
+    extraWidth = 60
+    extraHeight = 30
+    dlg.resize(total_w + extraWidth, total_h + extraHeight)
+
+    layout.addWidget(table)
+    # layout.addSpacerItem(QSpacerItem(0, 0, QSizePolicy.Minimum, QSizePolicy.Expanding))
+
+    dlg.setLayout(layout)
+    dlg.show()
+
+    return dlg
+
+
+from qt import QDialog, QVBoxLayout, QLabel, QPixmap
+
+
+def createImageWidget(image_path, parent: Optional[QDialog] = None):
+    """Create a QLabel widget with a pixmap of the input image path"""
+    labelWidget = QLabel(parent)
+    pixmap = QPixmap(image_path)
+
+    if pixmap.isNull():
+        labelWidget.setText("Failed to load image.")
+    else:
+        labelWidget.setPixmap(pixmap)
+        labelWidget.setScaledContents(True)  # Optional: scales image to fit label
+        # allow shrinkage:
+        # labelWidget.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Ignored)
+    return labelWidget
+
+
+def show_image_window(image_path):
+    """
+    Display an image in a Qt dialog window.
+
+    :param image_path: full path to the image file
+    :return: the QDialog instance
+    """
+    parent = slicer.util.mainWindow()
+    dlg = QDialog(parent)
+    dlg.setWindowTitle("Image Viewer")
+
+    layout = QVBoxLayout(dlg)
+
+    # Create label and set pixmap
+    label = QLabel()
+    pixmap = QPixmap(image_path)
+
+    if pixmap.isNull():
+        label.setText("Failed to load image.")
+    else:
+        label.setPixmap(pixmap)
+        label.setScaledContents(True)  # Optional: scales image to fit label
+        label.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Ignored)
+
+    layout.addWidget(label)
+    dlg.setLayout(layout)
+    dlg.resize(pixmap.width(), pixmap.height())  # auto-size to image
+    dlg.show()
+
+    return dlg
