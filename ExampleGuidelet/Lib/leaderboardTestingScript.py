@@ -32,6 +32,7 @@ gi = slicer.modules.ExampleGuideletWidget.guideletInstance
 prog = gi.progressObj
 zt = gi.zoneTuples
 sessDir = r"C:\Users\mikeb\Documents\DynamicAirway\2024BootCamp\Analysis\BootcampSessionsOnly"  # now includes LAR3 file
+sessDir = r"C:\Users\mike.bindschadler@seattlechildrens.org\OneDrive - SCH\Airway4D\Temp\TrackerFiles\2024\ToShare\SessionFiles_Fixed"
 listOfScopeRuns = loadAllScopeRunsFromDirectory(sessDir)
 scoreInfo = []
 for sr in listOfScopeRuns:
@@ -61,3 +62,9 @@ sr = validScopeRuns[-2]
 
 L = Leaderboard(validScopeRuns)
 L.display(currentSr=sr)
+
+lPath = Path(slicer.app.temporaryPath, "LeaderBoardTestSave.json")
+L.serialize(lPath)
+
+L_loaded = Leaderboard.deserialize(lPath)
+L_loaded.display()

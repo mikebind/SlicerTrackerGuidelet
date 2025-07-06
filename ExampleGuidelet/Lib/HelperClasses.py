@@ -7,6 +7,7 @@ import re
 import slicer, vtk
 from typing import List, Tuple, Optional
 import scipy
+from pathlib import Path
 
 
 """
@@ -503,7 +504,7 @@ class ScopeRun(object):
         # Gather data
         advPhaseDuration = self.advPhase.duration()
         nContactsList = [za.nSounds for za in self.advPhase.zoneAnalysisDict.values()]
-        nTotalContacts = np.sum(nContactsList)
+        nTotalContacts = int(np.sum(nContactsList))
         totalContactDurationList = [
             za.totalContactDuration for za in self.advPhase.zoneAnalysisDict.values()
         ]
@@ -758,27 +759,34 @@ class Leaderboard(object):
     rankings restricting to unique usernames and including duplicate usernames.
     """
 
-    def __init__(self, listOfScopeRuns=None):
-        self.listOfScopeRuns = listOfScopeRuns or []
+    def __init__(self, listOfScopeRuns=None, listOfEntries=None):
+        self.listOfEntries: List[LeaderboardEntry] = listOfEntries or []
+        if listOfScopeRuns is not None:
+            for sr in listOfScopeRuns:
+                self.addNewScopeRun(sr)
         self.sort()
 
     def addNewScopeRun(self, sr: ScopeRun):
-        self.listOfScopeRuns.append(sr)
+        entry = LeaderboardEntry(parentScopeRun=sr)
+        self.addNewEntry(entry)
+
+    def addNewEntry(self, entry: "LeaderboardEntry"):
+        self.listOfEntries.append(entry)
         self.sort()
 
     def sort(self):
-        self.listOfScopeRuns.sort(key=lambda sr: sr.score)
+        self.listOfEntries.sort(key=lambda entry: entry.score)
 
-    def getTopNResults(self, nResults=10, uniqFlag=True):
+    def getTopNResults(self, nResults: int = 10, uniqFlag: bool = True):
         """Get the top nResults scope runs"""
         topNList = []
         userNames = []
-        for sr in self.listOfScopeRuns:
-            if uniqFlag and (sr.userName in userNames):
+        for entry in self.listOfEntries:
+            if uniqFlag and (entry.userName in userNames):
                 # the better score came first, so safe to skip this one
                 continue
-            userNames.append(sr.userName)
-            topNList.append(sr)
+            userNames.append(entry.userName)
+            topNList.append(entry)
             if len(topNList) == nResults:
                 break
         return topNList
@@ -788,8 +796,81 @@ class Leaderboard(object):
         topNList = self.getTopNResults(nResults=nResults, uniqFlag=uniqFlag)
         show_leaderboard(topNList, currentSr)
 
-    def serialze(self, filePath):
-        pass
+    def serialize(self, filePath: Path):
+        """Save the current leaderboard entry data into a serializable text format."""
+        txt = json.dumps(
+            list([entry.serialize() for entry in self.listOfEntries]), indent=4
+        )
+        with open(filePath.as_posix(), "w") as f:
+            f.write(txt)
+        print(f"Successfully wrote string to '{filePath.as_posix()}'")
+
+    @classmethod
+    def deserialize(cls, filePath: Path):
+        with filePath.open("r") as fp:
+            entryDataList = json.load(fp)
+        listOfEntries = []
+        for entryDataStr in entryDataList:
+            entry = LeaderboardEntry.deserialize(entryDataStr)
+            listOfEntries.append(entry)
+        return Leaderboard(listOfEntries=listOfEntries)
+
+
+class LeaderboardEntry(object):
+    def __init__(self, parentScopeRun: Optional[ScopeRun] = None):
+        self.score: Optional[float] = None
+        self.scoreComponents: Optional[dict] = None
+        self.userName: Optional[str] = None
+        self.flawlessFlag: Optional[bool] = True
+        self.parentScopeRun: Optional[ScopeRun] = None  # This will not be serialized
+        if parentScopeRun is not None:
+            self.setParentScopeRun(parentScopeRun)
+
+    def setParentScopeRun(self, parentScopeRun: ScopeRun):
+        self.score = parentScopeRun.score
+        self.scoreComponents = parentScopeRun.scoreComponents
+        self.userName = parentScopeRun.userName
+        self.flawlessFlag = parentScopeRun.flawlessFlag
+        self.parentScopeRun = parentScopeRun
+
+    def serialize(self) -> str:
+        """
+        Serializes the object to a JSON string, excluding the parentScopeRun.
+        """
+        # Create a dictionary with only the attributes you want to serialize
+        data_to_serialize = {
+            "score": self.score,
+            "scoreComponents": self.scoreComponents,
+            "userName": self.userName,
+            "flawlessFlag": self.flawlessFlag,
+        }
+        return json.dumps(data_to_serialize, indent=4)
+
+    @classmethod
+    def deserialize(cls, json_string: str) -> "LeaderboardEntry":
+        """
+        Deserializes a JSON string into a new LeaderboardEntry object.
+        The parentScopeRun will be None.
+        """
+        data = json.loads(json_string)
+
+        # Create a new instance without a parentScopeRun
+        new_entry = cls()
+
+        # Populate the attributes from the loaded data
+        new_entry.score = data.get("score")
+        new_entry.scoreComponents = data.get("scoreComponents")
+        new_entry.userName = data.get("userName")
+        new_entry.flawlessFlag = data.get("flawlessFlag")
+
+        return new_entry
+
+    def __repr__(self):
+        """A helper method for prettier printing."""
+        return (
+            f"LeaderboardEntry(userName='{self.userName}', score={self.score}, "
+            f"flawless={self.flawlessFlag}, has_parent={self.parentScopeRun is not None})"
+        )
 
 
 class OLD_ScopeRun(object):
@@ -2166,11 +2247,13 @@ from qt import (
 )
 
 
-def makeScoreQTable(srList: List[ScopeRun], parent: Optional[QDialog] = None):
+def makeScoreQTable(
+    entryList: List[LeaderboardEntry], parent: Optional[QDialog] = None
+):
     """Make QTableWidget showing score data with one row per scopeRun
     in the list
     """
-    table = QTableWidget(len(srList), 6, parent)
+    table = QTableWidget(len(entryList), 6, parent)
     table.setHorizontalHeaderLabels(
         [
             "User",
@@ -2197,22 +2280,22 @@ def makeScoreQTable(srList: List[ScopeRun], parent: Optional[QDialog] = None):
     )
 
     # fill in rows
-    for row, sr in enumerate(srList):
+    for row, entry in enumerate(entryList):
         # username cell
-        u = QTableWidgetItem(sr.userName)
+        u = QTableWidgetItem(entry.userName)
         # score cell
-        scoreStr = f"{int(sr.score)} {'*' if sr.flawlessFlag else ''}"
+        scoreStr = f"{int(entry.score)} {'*' if entry.flawlessFlag else ''}"
         s = QTableWidgetItem(scoreStr)
         # advTime cell
-        advTimeW = QTableWidgetItem(f"{sr.advPhase.duration():0.1f}")
+        advTimeW = QTableWidgetItem(f"{entry.scoreComponents['advancingTime'][0]:0.1f}")
         # number of contacts cell
-        nContacts = sr.scoreComponents["contactCountPenalty"][0]
+        nContacts = entry.scoreComponents["contactCountPenalty"][0]
         nContactsW = QTableWidgetItem(f"{nContacts}")
         # contact time cell
-        contactTime = sr.scoreComponents["contactTimePenalty"][0]
+        contactTime = entry.scoreComponents["contactTimePenalty"][0]
         contactTimeW = QTableWidgetItem(f"{contactTime:0.1f}")
         # withdrawal time cell
-        wdrTime = sr.wdrPhase.duration()
+        wdrTime = entry.scoreComponents["withdrawalPenalty"][0]
         maxWithdrawalTime = 5
         minWithdrawalTime = 2
         if wdrTime > maxWithdrawalTime:
