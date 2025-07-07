@@ -33,9 +33,20 @@ from Lib.HelperClasses import (
     getWaveFileDuration,
     Leaderboard,
 )
+from enum import Enum
 
 
 # Lib.HelperClasses.loadOnlyScopeRunsFromSessionFile()
+
+# To populate head model selector in guidelet launcher:
+HEAD_MODEL_OPTIONS = Enum(
+    "HeadModelOptions",
+    [
+        ("y2025_CHEST_PANEL_HEAD", "2025 Head w/Chest Panel"),
+        ("y2025_SIDE_PANEL_HEAD", "2025 Head w/Side Panel"),
+        ("y2024_HEAD_FINAL", "2024 Head"),
+    ],
+)
 
 ################## Pulled from SlicerGuideletBase ####################
 ##### GuideletLoadable, GuideletLogic, GuideletWidget, and Guidelet
@@ -114,6 +125,7 @@ class GuideletWidget(ScriptedLoadableModuleWidget):
     def addLauncherWidgets(
         self,
     ):  # Overriding this you can add user preferences to the launcher widgets
+        self.addHeadModelSelector()
         self.addConfigurationsSelector()
         self.addPlusServerPreferences()
 
@@ -157,6 +169,18 @@ class GuideletWidget(ScriptedLoadableModuleWidget):
         self.plusServerHostNamePortLineEdit.connect(
             "editingFinished()", self.onPlusServerPreferencesChanged
         )
+
+    def addHeadModelSelector(self):
+        self.headModelSelector = qt.QComboBox()
+        label = qt.QLabel("Select head model: ")
+        hBox = qt.QHBoxLayout()
+        hBox.addWidget(label)
+        hBox.addWidget(self.headModelSelector)
+        hBox.setStretch(1, 2)
+        self.launcherFormLayout.addRow(hBox)
+        # Populate options
+        for headModelOption in HEAD_MODEL_OPTIONS:
+            self.headModelSelector.addItem(headModelOption.value)
 
     # Adds a list box populated with the available configurations in the Slicer.ini file
     def addConfigurationsSelector(self):
@@ -1197,9 +1221,9 @@ class Guidelet(object):
             self.connectorNode.GetState()
             == slicer.vtkMRMLIGTLConnectorNode.StateConnected
         ):
-            self.onConnectorNodeConnected(None, None, True)
+            self.onConnectorNodeConnected(None, None, force=True)
         else:
-            self.onConnectorNodeDisconnected(None, None, True)
+            self.onConnectorNodeDisconnected(None, None, force=True)
 
         # Add observers for connect/disconnect events
         events = [
@@ -1366,58 +1390,13 @@ SCOPE_SENSOR_TRANSFORM_POSITION_IN_HIERARCHY = 2
 DEFAULT_LEAF_TRANSFORM_NODE_NAME = "Extra"
 moduleDir = os.path.dirname(__file__)
 segDir = os.path.join(moduleDir, "Resources", "Segmentations")
-segDir2024F = os.path.join(moduleDir, "Resources", "Segmentations", "BootCamp2024Final")
 
-PEGNECK_AIRWAYZONE_SEGMENTATION = os.path.join(
-    segDir, "airwayZoneSegmentation.seg.nrrd"
-)
-
-RIGIDNECK_AIRWAYZONE_SEGMENTATION = os.path.join(
-    segDir, "RigidNeckAirwaySegmentation.seg.nrrd"
-)
-RIGIDNECK_STL = os.path.join(segDir, "SolidOuter_Cropped.stl")
-
-SUPINE_AIRWAYZONE_SEGMENTATION = os.path.join(segDir, "SupineScanSegmentation.seg.nrrd")
-SUPINE_STL = os.path.join(segDir, "SupineSinusModel.vtk")
-SUPINE_IMAGE = os.path.join(segDir, "SupineCroppedImage.nrrd")
-JULY9_AIRWAYZONE_SEGMENTATION = os.path.join(
-    segDir, "July9ScanAirwayZoneSegmentation.seg.nrrd"
-)
-JULY9_OUTERMODEL_STL = os.path.join(
-    segDir,
-    "July9ScanAirwayZoneSegmentation_OuterSupineSinusModel.stl",
-)
-JULY9_IMAGE = os.path.join(segDir, "July9_AxBone11_cropped1mm.nrrd")
-
-AIRWAY_PRACTICE_2024_AIRWAYZONE_SEGMENTATION = os.path.join(
-    segDir, "SoundsSegmentationHardToJ9.seg.nrrd"
-)
-AIRWAY_PRACTICE_2024_IMAGE = os.path.join(
-    segDir,
-    "AIRWAY TESTING_Silicone Nose_PracticeModel_Scan_1mm.nrrd",
-)
-AIRWAY_PRACTICE_2024_OUTERMODEL_STL = os.path.join(
-    segDir,
-    "PrintedPlasticSimpDecim_2024.stl",
-)
-
-Final2024_OUTERMODEL_STL = os.path.join(segDir2024F, "PrintedPlasticSolidApprox.stl")
-Final2024_AIRWAYZONE_SEGMENTATION = os.path.join(
-    segDir2024F, "airwayZoneOnly_LowRes2mm.seg.nrrd"
-)
-Final2024_IMAGE = os.path.join(segDir2024F, "Final2024BootCamp_1mm.nrrd")
-FOR_VIEWPOINT_TRANSFORM_2024_SCOPE1 = os.path.join(segDir2024F, "ForViewpoint.h5")
-
-COUGH_ZONE_MODEL_STL = os.path.join(segDir2024F, "CoughZoneTrimmed.stl")
+# Independent of head/segmentation
 COUGH_ZONE_COLOR = (0.945098, 0.839216, 0.568627)
-GAG_ZONE_MODEL_STL = os.path.join(segDir2024F, "GagZone.stl")
 GAG_ZONE_COLOR = (0.694118, 0.478431, 0.396078)
-OUCH2_ZONE_MODEL_STL = os.path.join(segDir2024F, "OuchZone2.stl")
 OUCH2_ZONE_COLOR = (0.501961, 0.682353, 0.501961)
-SEPTUM_ZONE_MODEL_STL = os.path.join(segDir2024F, "SeptumZoneTrimmed.stl")
 SEPTUM_ZONE_COLOR = (0.5647, 0.9333, 0.5647)
-# TEST_ZONE_MODEL_STL = os.path.join(segDir, "testSoundZone.stl")
-# Sound Paths
+
 soundDir = os.path.join(moduleDir, "Resources", "Sounds")
 COUGH_SOUND_PATH = pathlib.Path(soundDir, "cough1_Edit.wav")
 GAG_SOUND_PATH = pathlib.Path(
@@ -1429,13 +1408,179 @@ MOUTH_SOUND_PATH = pathlib.Path(soundDir, "Mouth.wav")
 RIGHT_NOSTRIL_SOUND_PATH = pathlib.Path(soundDir, "RightNostril.wav")
 TEST_SOUND_PATH = pathlib.Path(soundDir, "testZoneSound.wav")
 
+
+## MARK: FINAL 2024 ##
+segDir2024F = os.path.join(moduleDir, "Resources", "Segmentations", "BootCamp2024Final")
+Final2024_OUTERMODEL_STL = os.path.join(segDir2024F, "PrintedPlasticSolidApprox.stl")
+Final2024_AIRWAYZONE_SEGMENTATION = os.path.join(
+    segDir2024F, "airwayZoneOnly_LowRes2mm.seg.nrrd"
+)
+Final2024_IMAGE = os.path.join(segDir2024F, "Final2024BootCamp_1mm.nrrd")
+Final2024_SOURCE_SEG = os.path.join(segDir2024F, "Final2024_Seg_1mm.seg.nrrd")
+Final2024_SENSOR_TO_STL_NAME = "HeadSensorTo2024Fina"
+Final2024_LUMENMODEL_STL = os.path.join(segDir2024F, "AirwayLumenModel.vtk")
+BC2024_COUGH_ZONE_MODEL_STL = os.path.join(segDir2024F, "CoughZoneTrimmed.stl")
+BC2024_GAG_ZONE_MODEL_STL = os.path.join(segDir2024F, "GagZone.stl")
+BC2024_OUCH2_ZONE_MODEL_STL = os.path.join(segDir2024F, "OuchZone2.stl")
+BC2024_SEPTUM_ZONE_MODEL_STL = os.path.join(segDir2024F, "SeptumZoneTrimmed.stl")
+# TEST_ZONE_MODEL_STL = os.path.join(segDir, "testSoundZone.stl")
+# This next depends on the selected SCOPE rathe than the selected
+FOR_VIEWPOINT_TRANSFORM_2024_SCOPE1 = os.path.join(segDir2024F, "ForViewpoint.h5")
+
 # For ProgressObj creation
-PROGRESS_REFERENCE_CURVE_PATH = pathlib.Path(
+Final2024_PROGRESS_CURVE = pathlib.Path(
     segDir, "ProgressReferenceCurve_2024BootCamp.mrk.json"
 )
-NOSE_CARINA_POINTS_PATH = pathlib.Path(
+
+Final2024_NOSE_CARINA_POINTS = pathlib.Path(
     segDir, "NoseCarinaEndpoints_2024BootCamp.mrk.json"
 )
+
+Final2024_ZONE_PATHS_DICT = {
+    "cough": {
+        "STL": BC2024_COUGH_ZONE_MODEL_STL,
+        "Color": COUGH_ZONE_COLOR,
+        "SoundPath": COUGH_SOUND_PATH,
+    },
+    "gag": {
+        "STL": BC2024_GAG_ZONE_MODEL_STL,
+        "Color": GAG_ZONE_COLOR,
+        "SoundPath": GAG_SOUND_PATH,
+    },
+    "septum": {
+        "STL": BC2024_SEPTUM_ZONE_MODEL_STL,
+        "Color": SEPTUM_ZONE_COLOR,
+        "SoundPath": SEPTUM_SOUND_PATH,
+    },
+    "ouch2": {
+        "STL": BC2024_OUCH2_ZONE_MODEL_STL,
+        "Color": OUCH2_ZONE_COLOR,
+        "SoundPath": OUCH2_SOUND_PATH,
+    },
+}
+FINAL_2024_SCENE_DICT = {
+    "image": Final2024_IMAGE,
+    "airwayZoneSeg": Final2024_AIRWAYZONE_SEGMENTATION,
+    "outerModel": Final2024_OUTERMODEL_STL,
+    "lumenModel": Final2024_LUMENMODEL_STL,
+    "sourceSeg": Final2024_SOURCE_SEG,
+    "sensorToStlTransformName": Final2024_SENSOR_TO_STL_NAME,
+    "zonePathsDict": Final2024_ZONE_PATHS_DICT,
+    "noseCarina": Final2024_NOSE_CARINA_POINTS,
+    "progressCurve": Final2024_PROGRESS_CURVE,
+}
+## MARK: CHEST 2025 ##
+
+segDir2025Chest = os.path.join(
+    moduleDir, "Resources", "Segmentations", "BootCamp2025_ChestHead"
+)
+CHEST2025_IMAGE = os.path.join(segDir2025Chest, "ChestHead_1mm.nrrd")
+CHEST2025_AIRWAYZONE_SEGMENTATION = os.path.join(
+    segDir2025Chest, "AirZoneSeg_2025Shared.seg.nrrd"
+)
+CHEST2025_OUTERMODEL_STL = os.path.join(segDir2025Chest, "Chest_Plastic.vtk")
+CHEST2025_LUMENMODEL_STL = os.path.join(segDir2025Chest, "Chest_AirwayLumen.vtk")
+CHEST2025_SOURCE_SEG = os.path.join(segDir2025Chest, "Seg_ChestPanelHead.seg.nrrd")
+CHEST2025_SENSOR_TO_STL_NAME = "HeadSensorTo2025Ches"
+# Sound zone models exported with decimation 0.6, and smoothing 0.3
+CHEST2025_COUGH_ZONE_MODEL = os.path.join(segDir2025Chest, "Chest_CoughZone.vtk")
+CHEST2025_GAG_ZONE_MODEL = os.path.join(segDir2025Chest, "Chest_GagZone.vtk")
+CHEST2025_SEPTUM_ZONE_MODEL = os.path.join(segDir2025Chest, "Chest_SeptumZone.vtk")
+CHEST2025_OUCH2_ZONE_MODEL = os.path.join(segDir2025Chest, "Chest_OuchZone2.vtk")
+CHEST2025_ZONE_PATHS_DICT = {
+    "cough": {
+        "STL": CHEST2025_COUGH_ZONE_MODEL,
+        "Color": COUGH_ZONE_COLOR,
+        "SoundPath": COUGH_SOUND_PATH,
+    },
+    "gag": {
+        "STL": CHEST2025_GAG_ZONE_MODEL,
+        "Color": GAG_ZONE_COLOR,
+        "SoundPath": GAG_SOUND_PATH,
+    },
+    "septum": {
+        "STL": CHEST2025_SEPTUM_ZONE_MODEL,
+        "Color": SEPTUM_ZONE_COLOR,
+        "SoundPath": SEPTUM_SOUND_PATH,
+    },
+    "ouch2": {
+        "STL": CHEST2025_OUCH2_ZONE_MODEL,
+        "Color": OUCH2_ZONE_COLOR,
+        "SoundPath": OUCH2_SOUND_PATH,
+    },
+}
+CHEST2025_NOSE_CARINA_POINTS = os.path.join(
+    segDir2025Chest, "Chest_NoseCarina.mrk.json"
+)
+CHEST2025_PROGRESS_CURVE = os.path.join(
+    segDir2025Chest, "Chest_ProgressCurveReference.mrk.json"
+)
+CHEST_2025_SCENE_DICT = {
+    "image": CHEST2025_IMAGE,
+    "airwayZoneSeg": CHEST2025_AIRWAYZONE_SEGMENTATION,
+    "outerModel": CHEST2025_OUTERMODEL_STL,
+    "lumenModel": CHEST2025_LUMENMODEL_STL,
+    "sourceSeg": CHEST2025_SOURCE_SEG,
+    "sensorToStlTransformName": CHEST2025_SENSOR_TO_STL_NAME,
+    "zonePathsDict": CHEST2025_ZONE_PATHS_DICT,
+    "noseCarina": CHEST2025_NOSE_CARINA_POINTS,
+    "progressCurve": CHEST2025_PROGRESS_CURVE,
+}
+
+## MARK: SIDE 2025 ##
+segDir2025Side = os.path.join(
+    moduleDir, "Resources", "Segmentations", "BootCamp2025_SideHead"
+)
+SIDE2025_IMAGE = os.path.join(segDir2025Side, "SideHead_1mm.nrrd")
+SIDE2025_AIRWAYZONE_SEGMENTATION = os.path.join(
+    segDir2025Side, "AirZoneSeg_2025Shared.seg.nrrd"
+)
+SIDE2025_OUTERMODEL_STL = os.path.join(segDir2025Side, "Side_Plastic.vtk")
+SIDE2025_LUMENMODEL_STL = os.path.join(segDir2025Side, "Side_AirwayLumen.vtk")
+SIDE2025_SOURCE_SEG = os.path.join(segDir2025Side, "Seg_SidePanelHead.seg.nrrd")
+SIDE2025_SENSOR_TO_STL_NAME = "HeadSensorTo2025Side"
+# Sound zone models exported with decimation 0.6, and smoothing 0.3
+SIDE2025_COUGH_ZONE_MODEL = os.path.join(segDir2025Side, "Side_CoughZone.vtk")
+SIDE2025_GAG_ZONE_MODEL = os.path.join(segDir2025Side, "Side_GagZone.vtk")
+SIDE2025_SEPTUM_ZONE_MODEL = os.path.join(segDir2025Side, "Side_SeptumZone.vtk")
+SIDE2025_OUCH2_ZONE_MODEL = os.path.join(segDir2025Side, "Side_OuchZone2.vtk")
+SIDE2025_ZONE_PATHS_DICT = {
+    "cough": {
+        "STL": SIDE2025_COUGH_ZONE_MODEL,
+        "Color": COUGH_ZONE_COLOR,
+        "SoundPath": COUGH_SOUND_PATH,
+    },
+    "gag": {
+        "STL": SIDE2025_GAG_ZONE_MODEL,
+        "Color": GAG_ZONE_COLOR,
+        "SoundPath": GAG_SOUND_PATH,
+    },
+    "septum": {
+        "STL": SIDE2025_SEPTUM_ZONE_MODEL,
+        "Color": SEPTUM_ZONE_COLOR,
+        "SoundPath": SEPTUM_SOUND_PATH,
+    },
+    "ouch2": {
+        "STL": SIDE2025_OUCH2_ZONE_MODEL,
+        "Color": OUCH2_ZONE_COLOR,
+        "SoundPath": OUCH2_SOUND_PATH,
+    },
+}
+SIDE2025_NOSE_CARINA_POINTS = os.path.join(segDir2025Chest, "Side_NoseCarina.mrk.json")
+SIDE2025_PROGRESS_CURVE = os.path.join(
+    segDir2025Chest, "Side_ProgressCurveReference.mrk.json"
+)
+SIDE_2025_SCENE_DICT = {
+    "image": SIDE2025_IMAGE,
+    "airwayZoneSeg": SIDE2025_AIRWAYZONE_SEGMENTATION,
+    "outerModel": SIDE2025_OUTERMODEL_STL,
+    "lumenModel": SIDE2025_LUMENMODEL_STL,
+    "sourceSeg": SIDE2025_SOURCE_SEG,
+    "sensorToStlTransformName": SIDE2025_SENSOR_TO_STL_NAME,
+    "zonePathsDict": SIDE2025_ZONE_PATHS_DICT,
+    "noseCarina": SIDE2025_NOSE_CARINA_POINTS,
+    "progressCurve": SIDE2025_PROGRESS_CURVE,
+}
 
 
 # MARK: ExampleGuideletLogic
@@ -1714,6 +1859,9 @@ class ExampleGuideletGuidelet(Guidelet):
             moduleDirectoryPath + "/Resources/Icons/ExampleGuidelet.png"
         )
         # Load image, segmentation, models
+        self.headModelSelection = (
+            slicer.modules.ExampleGuideletWidget.headModelSelector.currentText
+        )
         self.setupScene()
 
         self.navigationView = self.VIEW_3D
@@ -2217,146 +2365,103 @@ class ExampleGuideletGuidelet(Guidelet):
         slicer.app.processEvents()
 
         # Which phantom??
+        """
+        For each head model, we want to load the following:
+        * image node
+        * airwayZone segmentation (should be low resolution and contain ONLY "airwayZone" segment) 
+        * segmentation node from which airway lumen, zones, outer model, etc are generated, but
+          is not actually displayed or used by default (just here for debugging and easier 
+          regeneration of models. Currently planning on exporting segments to models with decimation 
+          set at 0.5, and smoothing at 0.5)
+        * outer model (plastic surface STL)
+        * Lumen model (for display)
+        * zone models (must be surface models rather than segementations for breach warning)
+        * components for progress object (progress curve & nose-carina points)
+        In addition, for each scope, the tracker wire may be oriented differently
+        and advanced a slightly different amount. The forViewpointTransform 
+        could be based on per-scope data as well. 
+        """
+        headModelText = self.headModelSelection
+        if headModelText == HEAD_MODEL_OPTIONS.y2024_HEAD_FINAL.value:
+            sceneLoadDict = FINAL_2024_SCENE_DICT
+        elif headModelText == HEAD_MODEL_OPTIONS.y2025_CHEST_PANEL_HEAD.value:
+            sceneLoadDict = CHEST_2025_SCENE_DICT
+        elif headModelText == HEAD_MODEL_OPTIONS.y2025_SIDE_PANEL_HEAD.value:
+            sceneLoadDict = SIDE_2025_SCENE_DICT
+        else:
+            util.warningDisplay(
+                "Head Model Selection does not match any known option!!"
+            )
+            raise Exception(
+                "Reached end of conditional tree without loading models! This shouldn't happen!!"
+            )
+
+        # HEAD_MODEL_OPTIONS = ["2025 Head w/Chest Panel", "2025 Head w/Side Panel", "2024 Head"]
         usingJuly9Scan = False
         usingSupineRigid = False
         usingPegNeckHead = False
-        usingScannedRigidNeckHead = (
-            False  # TODO: make this switchable as a configuration
-        )
+        usingScannedRigidNeckHead = False
         using2024PracticeScan = False
-        using2024FinalScan = True
-        # using2025 = True
+        # using2024FinalScan = True
 
         pn = self.parameterNode
-        if usingPegNeckHead:
-            AIRWAYZONE_SEGMENTATION = PEGNECK_AIRWAYZONE_SEGMENTATION
-        elif usingScannedRigidNeckHead:
-            AIRWAYZONE_SEGMENTATION = RIGIDNECK_AIRWAYZONE_SEGMENTATION
-            # Load matching STL
-            outerModelNode = slicer.util.loadModel(RIGIDNECK_STL)
-            outerModelNode.GetDisplayNode().SetOpacity(0.1)
-        elif usingSupineRigid:
-            AIRWAYZONE_SEGMENTATION = SUPINE_AIRWAYZONE_SEGMENTATION
-            # Load matching surface
-            outerModelNode = slicer.util.loadModel(SUPINE_STL)
-            outerModelNode.GetDisplayNode().SetOpacity(0.1)
-            # Load matching image
-            imageNode = slicer.util.loadVolume(SUPINE_IMAGE)
-        elif usingJuly9Scan:
-            AIRWAYZONE_SEGMENTATION = JULY9_AIRWAYZONE_SEGMENTATION
-            # Load matching surface?
-            outerModelNode = slicer.util.loadModel(JULY9_OUTERMODEL_STL)
-            # Came from SupineRigid_STL, but manually registered, and then filled
-            # in so that the outer layer is an uncomplicated reference with a nose
-            # and a closed neck.
-            outerModelNode.GetDisplayNode().SetOpacity(0.1)
-            # Load matching image
-            imageNode = slicer.util.loadVolume(JULY9_IMAGE)
-        elif using2024FinalScan:
-            imageNode = slicer.util.loadVolume(Final2024_IMAGE)
-            AIRWAYZONE_SEGMENTATION = Final2024_AIRWAYZONE_SEGMENTATION
-            # Load STL here also (outer model)
-            outerModelNode = slicer.util.loadModel(Final2024_OUTERMODEL_STL)
-            outerModelNode.GetDisplayNode().SetOpacity(0.1)
-            # Load ForViewpoint transform (for bullseye view)
-            forViewpointTransform = slicer.util.loadTransform(
-                FOR_VIEWPOINT_TRANSFORM_2024_SCOPE1
-            )
-            self.forViewpointTransform = forViewpointTransform
 
-            # Load sound models (or export from segmentation)
-            coughZoneModel = slicer.util.loadModel(COUGH_ZONE_MODEL_STL)
-            coughZoneModel.GetDisplayNode().SetColor(COUGH_ZONE_COLOR)
-            pn.SetNodeReferenceID("coughZoneModel", coughZoneModel.GetID())
-            pn.SetParameter("coughSoundPath", COUGH_SOUND_PATH.as_posix())
+        # Load indicated components using sceneLoadDict
+        imagePath = sceneLoadDict["image"]
+        imageNode = slicer.util.loadVolume(imagePath)
+        # Load STLs here  (outer model & lumen)
+        outerModelPath = sceneLoadDict["outerModel"]
+        outerModelNode = slicer.util.loadModel(outerModelPath)
+        outerModelNode.GetDisplayNode().SetOpacity(0.1)
+        lumenModelPath = sceneLoadDict["lumenModel"]
+        lumenModelNode = slicer.util.loadModel(lumenModelPath)
+        lumenModelNode.GetDisplayNode().SetOpacity(0.4)
+        # Load Zone models, set sound paths
+        for zoneName in sceneLoadDict["zonePathsDict"].keys():
+            zoneDict = sceneLoadDict["zonePathsDict"][zoneName]
+            zoneModel = util.loadModel(zoneDict["STL"])
+            dn = zoneModel.GetDisplayNode()
+            dn.SetColor(zoneDict["Color"])
+            dn.SetVisibility(0)  # Hide zone models
+            pn.SetNodeReferenceID(f"{zoneName}ZoneModel", zoneModel.GetID())
+            pn.SetParameter(f"{zoneName}SoundPath", zoneDict["SoundPath"].as_posix())
+        # Load source segmentation (but hide)
+        sourceSegPath = sceneLoadDict["sourceSeg"]
+        sourceSeg = util.loadSegmentation(sourceSegPath)
+        sourceSeg.GetDisplayNode().SetVisibility(0)
 
-            gagZoneModel = slicer.util.loadModel(GAG_ZONE_MODEL_STL)
-            gagZoneModel.GetDisplayNode().SetColor(GAG_ZONE_COLOR)
-            pn.SetNodeReferenceID("gagZoneModel", gagZoneModel.GetID())
-            pn.SetParameter("gagSoundPath", GAG_SOUND_PATH.as_posix())
-            septumZoneModel = slicer.util.loadModel(SEPTUM_ZONE_MODEL_STL)
-            septumZoneModel.GetDisplayNode().SetColor(SEPTUM_ZONE_COLOR)
-            pn.SetNodeReferenceID("septumZoneModel", septumZoneModel.GetID())
-            pn.SetParameter("septumSoundPath", SEPTUM_SOUND_PATH.as_posix())
-
-            ouch2ZoneModel = slicer.util.loadModel(OUCH2_ZONE_MODEL_STL)
-            ouch2ZoneModel.GetDisplayNode().SetColor(OUCH2_ZONE_COLOR)
-            pn.SetNodeReferenceID("ouch2ZoneModel", ouch2ZoneModel.GetID())
-            pn.SetParameter("ouch2SoundPath", OUCH2_SOUND_PATH.as_posix())
-            #
-            # testZoneModel = slicer.util.loadModel(TEST_ZONE_MODEL_STL)
-            # pn.SetNodeReferenceID("testZoneModel", testZoneModel.GetID())
-            # pn.SetParameter("testZoneSoundPath", TEST_SOUND_PATH.as_posix())
-
-            ## HIDE the zone models for the bootcamp
-            zoneModelNodes = [
-                coughZoneModel,
-                gagZoneModel,
-                septumZoneModel,
-                ouch2ZoneModel,
-            ]
-            for node in zoneModelNodes:
-                node.GetDisplayNode().SetVisibility(0)
-            # Load the segmentation node and hide all but the airway lumen
-            segNode = slicer.util.loadSegmentation(
-                pathlib.Path(segDir2024F, "Final2024_Seg_1mm.seg.nrrd")
-            )
-            segmentIDList = segNode.GetSegmentation().GetSegmentIDs()
-            segNamesToShow = ["AirwayLumen"]
-            for segID in segmentIDList:
-                segName = segNode.GetSegmentation().GetSegment(segID).GetName()
-                if segName in segNamesToShow:
-                    segNode.GetDisplayNode().SetSegmentVisibility(segID, 1)
-                else:
-                    segNode.GetDisplayNode().SetSegmentVisibility(segID, 0)
-            segNode.GetDisplayNode().SetOpacity3D(0.5)
-            # NOTE: zoneTuples is built later
-
-            ## Build the progress object (load curve and ref points)
-            progressRefCurveNode = slicer.util.loadMarkupsCurve(
-                PROGRESS_REFERENCE_CURVE_PATH
-            )
-            noseCarinaPointsNode = slicer.util.loadMarkups(NOSE_CARINA_POINTS_PATH)
-            self.progressObj = ProgressObj(progressRefCurveNode, noseCarinaPointsNode)
-
-        elif using2024PracticeScan:
-            #
-            imageNode = slicer.util.loadVolume(AIRWAY_PRACTICE_2024_IMAGE)
-            AIRWAYZONE_SEGMENTATION = AIRWAY_PRACTICE_2024_AIRWAYZONE_SEGMENTATION
-            # Load STL here also (outer model)
-
-            # Load sound models (or export from segmentation)
-            coughZoneModel = slicer.util.loadModel(COUGH_ZONE_MODEL_STL)
-            coughZoneModel.GetDisplayNode().SetColor(COUGH_ZONE_COLOR)
-            pn.SetNodeReferenceID("coughZoneModel", coughZoneModel.GetID())
-            pn.SetParameter("coughSoundPath", COUGH_SOUND_PATH.as_posix())
-
-            gagZoneModel = slicer.util.loadModel(GAG_ZONE_MODEL_STL)
-            gagZoneModel.GetDisplayNode().SetColor(GAG_ZONE_COLOR)
-            pn.SetNodeReferenceID("gagZoneModel", gagZoneModel.GetID())
-            pn.SetParameter("gagSoundPath", GAG_SOUND_PATH.as_posix())
-
-            ouchZoneModel = slicer.util.loadModel(OUCH_ZONE_MODEL_STL)
-            ouchZoneModel.GetDisplayNode().SetColor(OUCH_ZONE_COLOR)
-            pn.SetNodeReferenceID("septumZoneModel", ouchZoneModel.GetID())
-            pn.SetParameter("septumSoundPath", OUCH_SOUND_PATH.as_posix())
-            #
-            testZoneModel = slicer.util.loadModel(TEST_ZONE_MODEL_STL)
-            pn.SetNodeReferenceID("testZoneModel", testZoneModel.GetID())
-            pn.SetParameter("testZoneSoundPath", TEST_SOUND_PATH.as_posix())
-
+        ## Build the progress object (load curve and ref points)
+        progressCurvePath = sceneLoadDict["progressCurve"]
+        progressRefCurveNode = util.loadMarkupsCurve(progressCurvePath)
+        noseCarinaPath = sceneLoadDict["noseCarina"]
+        noseCarinaPointsNode = util.loadMarkups(noseCarinaPath)
+        self.progressObj = ProgressObj(progressRefCurveNode, noseCarinaPointsNode)
         # Load airwayZone segmentation
-        airwayZoneSegmentationNode = slicer.util.loadSegmentation(
-            AIRWAYZONE_SEGMENTATION
-        )
+        airZoneSegPath = sceneLoadDict["airwayZoneSeg"]
+        airwayZoneSegmentationNode = slicer.util.loadSegmentation(airZoneSegPath)
         self.parameterNode.SetNodeReferenceID(
             "airwayZoneSegmentationNode", airwayZoneSegmentationNode.GetID()
         )
         self.airwayZoneSegmentationNodeSelector.setCurrentNodeID(
             airwayZoneSegmentationNode.GetID()
         )
+        self.adjustAirwayZoneDisplay(airwayZoneSegmentationNode)
+
+        # Load ForViewpoint transform (for bullseye view)
+        forViewpointTransform = slicer.util.loadTransform(
+            FOR_VIEWPOINT_TRANSFORM_2024_SCOPE1
+        )
+        self.forViewpointTransform = forViewpointTransform
+
+        #
+        # testZoneModel = slicer.util.loadModel(TEST_ZONE_MODEL_STL)
+        # pn.SetNodeReferenceID("testZoneModel", testZoneModel.GetID())
+        # pn.SetParameter("testZoneSoundPath", TEST_SOUND_PATH.as_posix())
+
+        # NOTE: zoneTuples is built later
+
         # loading segmentation here also buys some more time for the transforms to get fully loaded into the scene
-        self.adjustSegmentationDisplay(airwayZoneSegmentationNode)
+
         # Center the 3D scene so segmentation is visible
         self.center3Dview()
 
@@ -2380,8 +2485,9 @@ class ExampleGuideletGuidelet(Guidelet):
         except slicer.util.MRMLNodeNotFoundException:
             # Conclude we are in testing mode for now
             slicer.util.errorDisplay(
-                "Expected transform not found, running it test/debug mode with dummy transforms!"
+                "CHANGE BACK!!! REMOVE RETURN !!Expected transform not found, running it test/debug mode with dummy transforms!"
             )
+            return
             # Create a dummy tip transform named "Extra"
             self.ExtraTransform = self.createTransformNode(
                 translationMm=[0, 0, 7.5], transformName="Extra"
@@ -2465,27 +2571,12 @@ class ExampleGuideletGuidelet(Guidelet):
                 )
                 slicer.util.updateTransformMatrixFromArray(T, np.array(matrix))
 
-            # return  # return early since the rest of the method will fail
-
         self.EmTrackerToHeadSensor = slicer.util.getNode("EmTrackerToHeadSenso")
         self.StylusSensorToEmTracker = slicer.util.getNode("StylusSensorToEmTrac")
         self.NeedleTipToStylusSensor = slicer.util.getNode("NeedleTipToStylusSen")
-        if usingPegNeckHead:
-            # self.HeadSensorToHeadSTL = slicer.util.getNode('HeadSensorToPegHeadS')
-            self.HeadSensorToHeadSTL = slicer.util.getNode("HeadSensorToNewPegHe")
-        elif usingScannedRigidNeckHead:
-            self.HeadSensorToHeadSTL = slicer.util.getNode("HeadSensorToRigidHea")
-        elif usingSupineRigid:
-            self.HeadSensorToHeadSTL = slicer.util.getNode("HeadSensorToScan2STL")
-        elif usingJuly9Scan:
-            self.HeadSensorToHeadSTL = slicer.util.getNode("HeadSensorToJuly9Sca")
-        elif using2024PracticeScan:
-            # Reuse because registered 2024 practice to this space
-            self.HeadSensorToHeadSTL = slicer.util.getNode("HeadSensorTo2024Prac")
-        elif using2024FinalScan:
-            self.HeadSensorToHeadSTL = slicer.util.getNode("HeadSensorTo2024Fina")
-        else:
-            self.HeadSensorToHeadSTL = slicer.util.getNode("HeadSensorToHeadSTL")
+        self.HeadSensorToHeadSTL = slicer.util.getNode(
+            sceneLoadDict["sensorToStlTransformName"]
+        )
         try:
             self.ExtraTransform = slicer.util.getNode("Extra")
         except slicer.util.MRMLNodeNotFoundException:
@@ -2556,35 +2647,25 @@ class ExampleGuideletGuidelet(Guidelet):
 
         return
 
-    def adjustSegmentationDisplay(self, airwayZoneSegmentationNode):
+    def adjustAirwayZoneDisplay(self, airwayZoneSegmentationNode):
         # Set opacity to transparent
         dn = airwayZoneSegmentationNode.GetDisplayNode()
-        dn.SetOpacity(0.2)
+        dn.SetOpacity(0.2)  # other opacities are multiplied by this
         seg = airwayZoneSegmentationNode.GetSegmentation()
         # Set airwayZone as visible but totally transparent
         airwayZoneSegmentID = seg.GetSegmentIdBySegmentName("airwayZone")
         dn.SetSegmentVisibility(airwayZoneSegmentID, True)
         dn.SetSegmentOpacity(airwayZoneSegmentID, 0)
-        # Set AirwayLumen as visible and opaque
-        airwayLumenSegmentID = seg.GetSegmentIdBySegmentName("AirwayLumen")
-        dn.SetSegmentVisibility(airwayLumenSegmentID, True)
-        dn.SetSegmentOpacity(airwayLumenSegmentID, 1)
-        # Set outer surface as visible but almost totally transparent
-        outerSegSegmentID = seg.GetSegmentIdBySegmentName(
-            "Rigid Sinus Model_FullyAssembled"
-        )  # name for pegneck segmentation, no corresponding segment for RigidNeck
-        if not outerSegSegmentID == "":
-            dn.SetSegmentVisibility(outerSegSegmentID, True)
-            dn.SetSegmentOpacity(
-                outerSegSegmentID, 0.25
-            )  # multiplied by the overall opacity
+        ## Set AirwayLumen as visible and opaque
+        # airwayLumenSegmentID = seg.GetSegmentIdBySegmentName("AirwayLumen")
+        # dn.SetSegmentVisibility(airwayLumenSegmentID, True)
+        # dn.SetSegmentOpacity(airwayLumenSegmentID, 1)
         # Set all other segments as not visible
         for idx in range(seg.GetNumberOfSegments()):
             segID = seg.GetNthSegmentID(idx)
             if segID not in [
                 airwayZoneSegmentID,
-                airwayLumenSegmentID,
-                outerSegSegmentID,
+                # airwayLumenSegmentID,
             ]:
                 dn.SetSegmentVisibility(segID, False)
 
