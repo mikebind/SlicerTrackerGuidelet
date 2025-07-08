@@ -1,0 +1,45 @@
+<PlusConfiguration version="2.1" PlusRevision="Plus-2.1.2.3381 - Win32">
+  <DataCollection StartupDelaySec="1">
+    <DeviceSet Name="Two clipable EM Sensors" Description="Connect sensor with case clip to sensor bay 1 (port 0) and the sensor attached to the flat clip to sensor bay 2 (port 1). Tracking two EM sensors. This config also sets up one virtual capture device for recording tracking to a file (This file records the tracking for both sensors). Broadcasting tool tracking data through OpenIGTLink." />
+    <Device
+      Id="EmTracker"
+      Type="Ascension3DG"
+      AcquisitionRate="50"
+      LocalTimeOffsetSec="0"
+      FilterAcWideNotch="1"
+      ToolReferenceFrame="EmTracker"
+      FilterAcNarrowNotch="0"
+      FilterDcAdaptive="0"
+      FilterLargeChange="0"
+      FilterAlpha="0">
+      <DataSources>
+        <DataSource Type="Tool" Id="CaseSensor" PortName="0" BufferSize="500" AveragedItemsForFiltering="20" />
+		<DataSource Type="Tool" Id="FlatSensor" PortName="1" BufferSize="500" AveragedItemsForFiltering="20" />
+      </DataSources>
+      <OutputChannels>
+        <OutputChannel Id="EmTrackerStream">
+          <DataSource Id="CaseSensor" />
+		  <DataSource Id="FlatSensor" />
+        </OutputChannel>
+      </OutputChannels>
+    </Device>
+	<Device Id="CaptureDevice" Type="VirtualCapture" BaseFileName="RecordingsTestMike.igs.mha" EnableCapturingOnStart="FALSE" > 
+		<InputChannels>
+			<InputChannel Id="EmTrackerStream" />
+		</InputChannels>
+	</Device>
+  </DataCollection>
+  <PlusOpenIGTLinkServer MaxNumberOfIgtlMessagesToSend="1" MaxTimeSpentWithProcessingMs="50" ListeningPort="18944" SendValidTransformsOnly="true" OutputChannelId="EmTrackerStream">
+    <DefaultClientInfo>
+      <MessageTypes>
+        <Message Type="TRANSFORM" />
+      </MessageTypes>
+      <TransformNames>
+        <Transform Name="CaseSensorToEmTracker" />
+		<Transform Name="FlatSensorToEmTracker" />
+      </TransformNames>
+    </DefaultClientInfo>
+  </PlusOpenIGTLinkServer>
+  
+
+</PlusConfiguration>
