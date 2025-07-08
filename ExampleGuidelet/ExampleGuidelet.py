@@ -2492,10 +2492,10 @@ class ExampleGuideletGuidelet(Guidelet):
             self.EmTrackerToHeadSensor = slicer.util.getNode("EmTrackerToHeadSenso")
         except slicer.util.MRMLNodeNotFoundException:
             # Conclude we are in testing mode for now
-            slicer.util.errorDisplay(
-                "CHANGE BACK!!! REMOVE RETURN !!Expected transform not found, running it test/debug mode with dummy transforms!"
-            )
-            return
+            # slicer.util.errorDisplay(
+            #    "CHANGE BACK!!! REMOVE RETURN !!Expected transform not found, running it test/debug mode with dummy transforms!"
+            # )
+            # return
             # Create a dummy tip transform named "Extra"
             self.ExtraTransform = self.createTransformNode(
                 translationMm=[0, 0, 7.5], transformName="Extra"
@@ -2749,10 +2749,6 @@ class ExampleGuideletGuidelet(Guidelet):
         loadedUIWidget = slicer.util.loadUI(uiFilePath)
         loadedUI = slicer.util.childWidgetVariables(loadedUIWidget)
         self.sliceletPanelLayout.addWidget(loadedUIWidget)
-
-        self.headModelSelector = loadedUI.headModelSelector
-        self.headModelSelector.addItem("2025_ChestPanel")
-        self.headModelSelector.addItem("2025_SidePanel")
 
         self.startStopRecordingButton = loadedUI.StartStopRecordingButton
         self.startStopRecordingButton.setCheckable(True)
