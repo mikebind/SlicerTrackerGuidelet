@@ -1486,9 +1486,13 @@ CHEST2025_SENSOR_TO_STL_NAME = "HeadSensorToFlat25Ch"  # NOTE:
 # used, not on which head model is used, but for 2025 bootcamp, the flat sensor
 # will be used for the Chest Panel head model.
 # Sound zone models exported with decimation 0.6, and smoothing 0.3
-CHEST2025_COUGH_ZONE_MODEL = os.path.join(segDir2025Chest, "Chest_CoughZone.vtk")
-CHEST2025_GAG_ZONE_MODEL = os.path.join(segDir2025Chest, "Chest_GagZone.vtk")
-CHEST2025_SEPTUM_ZONE_MODEL = os.path.join(segDir2025Chest, "Chest_SeptumZone.vtk")
+CHEST2025_COUGH_ZONE_MODEL = os.path.join(
+    segDir2025Chest, "Chest_CoughZone_Cleaned.vtk"
+)
+CHEST2025_GAG_ZONE_MODEL = os.path.join(segDir2025Chest, "Chest_GagZone_Cleaned.vtk")
+CHEST2025_SEPTUM_ZONE_MODEL = os.path.join(
+    segDir2025Chest, "Chest_SeptumZone_Cleaned.vtk"
+)
 CHEST2025_OUCH2_ZONE_MODEL = os.path.join(segDir2025Chest, "Chest_OuchZone2.vtk")
 CHEST2025_ZONE_PATHS_DICT = {
     "cough": {
