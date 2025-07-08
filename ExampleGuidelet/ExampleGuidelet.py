@@ -327,7 +327,7 @@ class GuideletLogic(ScriptedLoadableModuleLogic):
             "StyleSheet": "DefaultStyle.qss",
             "LiveUltrasoundNodeName": "Image_Reference",
             "LiveUltrasoundNodeName_Needle": "Image_Needle",
-            "PlusServerHostNamePort": "localhost:18944",
+            "PlusServerHostNamePort": "localhost:18940",
             "RecordingFilenamePrefix": "GuideletRecording-",
             "RecordingFilenameExtension": ".mhd",
             "PlusAppDataDirectory": plusAppDataDirectory,

@@ -29,7 +29,7 @@
 		</InputChannels>
 	</Device>
   </DataCollection>
-  <PlusOpenIGTLinkServer MaxNumberOfIgtlMessagesToSend="1" MaxTimeSpentWithProcessingMs="50" ListeningPort="18944" SendValidTransformsOnly="true" OutputChannelId="EmTrackerStream">
+  <PlusOpenIGTLinkServer MaxNumberOfIgtlMessagesToSend="1" MaxTimeSpentWithProcessingMs="50" ListeningPort="18940" SendValidTransformsOnly="true" OutputChannelId="EmTrackerStream">
     <DefaultClientInfo>
       <MessageTypes>
         <Message Type="TRANSFORM" />
