@@ -59,11 +59,11 @@
 	relative to point, and tried to hit the middle of the donut. 
 	-->
 	<Transform From="HeadSensor" To="2025ChestAndSide"
-	Matrix="0.0660032 0.997817 -0.00216096 -10.2857 
-	0.80048 -0.0542425 -0.5969 -206.216 
-	-0.595714 0.0376675 -0.802313 195.482 
+	Matrix="0.0227468 0.997885 0.0608939 6.42057 
+	0.838455 0.014132 -0.544788 68.3707 
+	-0.544496 0.063449 -0.83636 -709.296 
 	0 0 0 1 "
-	Error="0.5827" Date="2025.07.07" />
+	Error="0.5404" Date="2025.07.07" />
 	<!--
 	Newly scanned for 2024 bootcamp final model. Rigid neck, silicone airway. Applied museum wax
 	to better lock down the head sensor, which had shifted.  Also used an interior corner as 

@@ -1474,7 +1474,7 @@ FINAL_2024_SCENE_DICT = {
 segDir2025Chest = os.path.join(
     moduleDir, "Resources", "Segmentations", "BootCamp2025_ChestHead"
 )
-CHEST2025_IMAGE = os.path.join(segDir2025Chest, "ChestHead_1mm.nrrd")
+CHEST2025_IMAGE = os.path.join(segDir2025Chest, "Chest_1mm.nrrd")
 CHEST2025_AIRWAYZONE_SEGMENTATION = os.path.join(
     segDir2025Chest, "AirZoneSeg_2025Shared.seg.nrrd"
 )
@@ -1531,7 +1531,7 @@ CHEST_2025_SCENE_DICT = {
 segDir2025Side = os.path.join(
     moduleDir, "Resources", "Segmentations", "BootCamp2025_SideHead"
 )
-SIDE2025_IMAGE = os.path.join(segDir2025Side, "SideHead_1mm.nrrd")
+SIDE2025_IMAGE = os.path.join(segDir2025Side, "Side_1mm.nrrd")
 SIDE2025_AIRWAYZONE_SEGMENTATION = os.path.join(
     segDir2025Side, "AirZoneSeg_2025Shared.seg.nrrd"
 )
