@@ -1481,7 +1481,10 @@ CHEST2025_AIRWAYZONE_SEGMENTATION = os.path.join(
 CHEST2025_OUTERMODEL_STL = os.path.join(segDir2025Chest, "Chest_Plastic.vtk")
 CHEST2025_LUMENMODEL_STL = os.path.join(segDir2025Chest, "Chest_AirwayLumen.vtk")
 CHEST2025_SOURCE_SEG = os.path.join(segDir2025Chest, "Seg_ChestPanelHead.seg.nrrd")
-CHEST2025_SENSOR_TO_STL_NAME = "HeadSensorTo2025Ches"
+CHEST2025_SENSOR_TO_STL_NAME = "HeadSensorToFlat25Ch"  # NOTE:
+# NOTE: the sensor to STL name actuall depends on which clipped sensor is
+# used, not on which head model is used, but for 2025 bootcamp, the flat sensor
+# will be used for the Chest Panel head model.
 # Sound zone models exported with decimation 0.6, and smoothing 0.3
 CHEST2025_COUGH_ZONE_MODEL = os.path.join(segDir2025Chest, "Chest_CoughZone.vtk")
 CHEST2025_GAG_ZONE_MODEL = os.path.join(segDir2025Chest, "Chest_GagZone.vtk")
@@ -1538,7 +1541,10 @@ SIDE2025_AIRWAYZONE_SEGMENTATION = os.path.join(
 SIDE2025_OUTERMODEL_STL = os.path.join(segDir2025Side, "Side_Plastic.vtk")
 SIDE2025_LUMENMODEL_STL = os.path.join(segDir2025Side, "Side_AirwayLumen.vtk")
 SIDE2025_SOURCE_SEG = os.path.join(segDir2025Side, "Seg_SidePanelHead.seg.nrrd")
-SIDE2025_SENSOR_TO_STL_NAME = "HeadSensorTo2025Side"
+SIDE2025_SENSOR_TO_STL_NAME = "HeadSensorToCase25Ch"  # NOTE:
+# NOTE: the sensor to STL name actually depends on which clipped sensor is
+# used, not on which head model is used, but for 2025 bootcamp, the Case sensor
+# will be used for the Side Panel head model.
 # Sound zone models exported with decimation 0.6, and smoothing 0.3
 SIDE2025_COUGH_ZONE_MODEL = os.path.join(segDir2025Side, "Side_CoughZone.vtk")
 SIDE2025_GAG_ZONE_MODEL = os.path.join(segDir2025Side, "Side_GagZone.vtk")
@@ -1566,9 +1572,9 @@ SIDE2025_ZONE_PATHS_DICT = {
         "SoundPath": OUCH2_SOUND_PATH,
     },
 }
-SIDE2025_NOSE_CARINA_POINTS = os.path.join(segDir2025Chest, "Side_NoseCarina.mrk.json")
+SIDE2025_NOSE_CARINA_POINTS = os.path.join(segDir2025Side, "Side_NoseCarina.mrk.json")
 SIDE2025_PROGRESS_CURVE = os.path.join(
-    segDir2025Chest, "Side_ProgressCurveReference.mrk.json"
+    segDir2025Side, "Side_ProgressCurveReference.mrk.json"
 )
 SIDE_2025_SCENE_DICT = {
     "image": SIDE2025_IMAGE,
@@ -2292,6 +2298,7 @@ class ExampleGuideletGuidelet(Guidelet):
                     # Display leaderboard with data for most recent run
                     sr = newRecording.listOfScopeRuns[-1]
                     self.leaderboard.display(currentSr=sr)
+                self.leaderboard.serialize()
 
     def updateRunsToReview(self):
         """From the current session object, update the dropdown"""
@@ -2433,6 +2440,7 @@ class ExampleGuideletGuidelet(Guidelet):
         ## Build the progress object (load curve and ref points)
         progressCurvePath = sceneLoadDict["progressCurve"]
         progressRefCurveNode = util.loadMarkupsCurve(progressCurvePath)
+        progressRefCurveNode.GetDisplayNode().SetVisibility(0)
         noseCarinaPath = sceneLoadDict["noseCarina"]
         noseCarinaPointsNode = util.loadMarkups(noseCarinaPath)
         self.progressObj = ProgressObj(progressRefCurveNode, noseCarinaPointsNode)

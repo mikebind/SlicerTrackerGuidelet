@@ -451,6 +451,8 @@ class ScopeRun(object):
             self.nasalPhase = nasalPhase
             self.pharynxPhase = pharynxPhase
             self.wdrPhase = wdrPhase
+            # Score
+            self.calcScore()
         else:
             # invalid scope run, do we want to do any reporting or
             # messaging here?
@@ -759,12 +761,19 @@ class Leaderboard(object):
     rankings restricting to unique usernames and including duplicate usernames.
     """
 
-    def __init__(self, listOfScopeRuns=None, listOfEntries=None):
+    def __init__(self, listOfScopeRuns=None, listOfEntries=None, savePath=None):
+        if savePath is None:
+            # use default name and save location
+            timeStamp = time.strftime(r"%Y-%m-%d-%H%M%S")
+            fileName = f"LeaderBoard_{timeStamp}.json"
+            savePath = Path(slicer.app.temporaryPath, fileName)
+        self.savePath = savePath
         self.listOfEntries: List[LeaderboardEntry] = listOfEntries or []
         if listOfScopeRuns is not None:
             for sr in listOfScopeRuns:
                 self.addNewScopeRun(sr)
         self.sort()
+        self.serialize()
 
     def addNewScopeRun(self, sr: ScopeRun):
         entry = LeaderboardEntry(parentScopeRun=sr)
@@ -796,14 +805,19 @@ class Leaderboard(object):
         topNList = self.getTopNResults(nResults=nResults, uniqFlag=uniqFlag)
         show_leaderboard(topNList, currentSr)
 
-    def serialize(self, filePath: Path):
+    def serialize(self, filePath: Optional[Path] = None):
         """Save the current leaderboard entry data into a serializable text format."""
+        if filePath is None:
+            filePath = self.savePath
+        if filePath.as_posix() == "":
+            raise Exception("Tried to serialize to empty path")
+        # Save
         txt = json.dumps(
             list([entry.serialize() for entry in self.listOfEntries]), indent=4
         )
         with open(filePath.as_posix(), "w") as f:
             f.write(txt)
-        print(f"Successfully wrote string to '{filePath.as_posix()}'")
+        logging.debug(f"Successfully wrote leaderboard to '{filePath.as_posix()}'")
 
     @classmethod
     def deserialize(cls, filePath: Path):

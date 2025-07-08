@@ -39,7 +39,8 @@
 		<Transform Name="EmTrackerToHeadSensor" />
 		<Transform Name="StylusTipToStylusSensor" />
 		<Transform Name="NeedleTipToStylusSensor" />
-		<Transform Name="HeadSensorTo2025ChestAndSide" />
+		<Transform Name="HeadSensorToFlat25ChestAndSide" />
+		<Transform Name="HeadSensorToCase25ChestAndSide" />
 		<Transform Name="CaseToFlat"/>
       </TransformNames>
     </DefaultClientInfo>
@@ -56,14 +57,28 @@
 	Newly scanned for 2025 bootcamp models. The plastic lines up perfectly, so this 
 	should work for both the chest panel and side panel models. Used only the 6 
 	registration points, but tried to keep the stylus in approx the same orientation
-	relative to point, and tried to hit the middle of the donut. 
+	relative to point, and tried to hit the middle of the donut. This used the 
+	flatter clip sensor clipped to the head.
 	-->
-	<Transform From="HeadSensor" To="2025ChestAndSide"
+	<Transform From="HeadSensor" To="Flat25ChestAndSide"
 	Matrix="0.0227468 0.997885 0.0608939 6.42057 
 	0.838455 0.014132 -0.544788 68.3707 
 	-0.544496 0.063449 -0.83636 -709.296 
 	0 0 0 1 "
 	Error="0.5404" Date="2025.07.07" />
+	<!--
+	Case clip to plastic transform.  There's unfortunately currently no good way to 
+	do as accurate a calibration for this version, because the Case clip sensor is
+	the same one used for the stylus point gathering, and you can't use it in two
+	places at once.  The below calibration comes from using the scope tip to perform
+	a calibration. 
+	-->
+	<Transform From="HeadSensor" To="Case25ChestAndSide"
+	Matrix="0.0107086 -0.0545836 0.998452 3.97359 
+	0.81904 0.573292 0.0225565 83.2454 
+	-0.573636 0.817531 0.0508453 -695.018 
+	0 0 0 1 "
+	Error="4.0" Date="2025.07.08" />
 	<!--
 	Newly scanned for 2024 bootcamp final model. Rigid neck, silicone airway. Applied museum wax
 	to better lock down the head sensor, which had shifted.  Also used an interior corner as 
