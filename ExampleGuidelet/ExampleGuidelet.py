@@ -2295,13 +2295,16 @@ class ExampleGuideletGuidelet(Guidelet):
                 self.updateRunsToReview()
                 # Resave the session file (updated with recording and run data)
                 self.currentSession.saveToFile()
-                # Add new run(s) to leaderboard
-                for sr in newRecording.listOfScopeRuns:
+                # Add new valid run(s) to leaderboard
+                valid_srs = [sr for sr in newRecording.listOfScopeRuns if sr.valid]
+                for sr in valid_srs:
                     self.leaderboard.addNewScopeRun(sr)
-                if numNewRuns > 0:
+                if len(valid_srs) > 0:
                     # Display leaderboard with data for most recent run
-                    sr = newRecording.listOfScopeRuns[-1]
-                    self.leaderboard.display(currentSr=sr)
+                    self.leaderboard.display(currentSr=valid_srs[-1])
+                else:
+                    # Show only leaderboard (no info on current run)
+                    self.leaderboard.display()
                 self.leaderboard.serialize()
 
     def updateRunsToReview(self):
@@ -2427,6 +2430,7 @@ class ExampleGuideletGuidelet(Guidelet):
         lumenModelPath = sceneLoadDict["lumenModel"]
         lumenModelNode = slicer.util.loadModel(lumenModelPath)
         lumenModelNode.GetDisplayNode().SetOpacity(0.4)
+        lumenModelNode.GetDisplayNode().SetColor(0.0, 1.0, 1.0)
         # Load Zone models, set sound paths
         for zoneName in sceneLoadDict["zonePathsDict"].keys():
             zoneDict = sceneLoadDict["zonePathsDict"][zoneName]
@@ -2437,9 +2441,10 @@ class ExampleGuideletGuidelet(Guidelet):
             pn.SetNodeReferenceID(f"{zoneName}ZoneModel", zoneModel.GetID())
             pn.SetParameter(f"{zoneName}SoundPath", zoneDict["SoundPath"].as_posix())
         # Load source segmentation (but hide)
-        sourceSegPath = sceneLoadDict["sourceSeg"]
-        sourceSeg = util.loadSegmentation(sourceSegPath)
-        sourceSeg.GetDisplayNode().SetVisibility(0)
+        # FOR BOOTCAMP DON'T LOAD, to avoid overhead
+        # sourceSegPath = sceneLoadDict["sourceSeg"]
+        # sourceSeg = util.loadSegmentation(sourceSegPath)
+        # sourceSeg.GetDisplayNode().SetVisibility(0)
 
         ## Build the progress object (load curve and ref points)
         progressCurvePath = sceneLoadDict["progressCurve"]

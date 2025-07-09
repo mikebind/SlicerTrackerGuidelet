@@ -776,6 +776,8 @@ class Leaderboard(object):
         self.serialize()
 
     def addNewScopeRun(self, sr: ScopeRun):
+        if not sr.valid:
+            return
         entry = LeaderboardEntry(parentScopeRun=sr)
         self.addNewEntry(entry)
 
@@ -2365,7 +2367,7 @@ def show_leaderboard(srList: List[ScopeRun], currentSr: Optional[ScopeRun] = Non
     # main layout
     layout = QVBoxLayout(dlg)
 
-    if currentSr is not None:
+    if currentSr is not None and currentSr.valid:
         # Add a section for the Current Run
         # Title
         curLabel = QLabel("Current Trial", dlg)
