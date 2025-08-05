@@ -2501,9 +2501,9 @@ class ExampleGuideletGuidelet(Guidelet):
             self.EmTrackerToHeadSensor = slicer.util.getNode("EmTrackerToHeadSenso")
         except slicer.util.MRMLNodeNotFoundException:
             # Conclude we are in testing mode for now
-            # slicer.util.errorDisplay(
-            #    "CHANGE BACK!!! REMOVE RETURN !!Expected transform not found, running it test/debug mode with dummy transforms!"
-            # )
+            slicer.util.errorDisplay(
+                "Expected transform not found, running it test/debug mode with dummy transforms!"
+            )
             # return
             # Create a dummy tip transform named "Extra"
             self.ExtraTransform = self.createTransformNode(
@@ -2516,7 +2516,7 @@ class ExampleGuideletGuidelet(Guidelet):
             # Set up dummy example transforms (so that gatherTransformsFromTransformHierarchy()
             # will work OK)
             tformNames = [
-                "HeadSensorTo2024Fina",
+                sceneLoadDict["sensorToStlTransformName"],  # "HeadSensorTo2024Fina",
                 "EmTrackerToHeadSenso",
                 "StylusSensorToEmTrac",
                 "NeedleTipToStylusSen",
@@ -2582,6 +2582,16 @@ class ExampleGuideletGuidelet(Guidelet):
                     [0.0, 0.0, 0.0, 1.0],
                 ],
             ]
+            # Which head sensor to model transform should be used depends
+            # on which sensor is clipped to the head, the flat one or the
+            # one which slides into the case
+            if tformNames[0] == "HeadSensorToCase25Ch":
+                tformMatrices[0] = [
+                    [0.0107086, -0.0545836, 0.998452, 3.97359],
+                    [0.81904, 0.573292, 0.0225565, 83.2454],
+                    [-0.573636, 0.817531, 0.0508453, -695.018],
+                    [0, 0, 0, 1],
+                ]
             for name, matrix in zip(tformNames, tformMatrices):
                 T = slicer.mrmlScene.AddNewNodeByClass(
                     "vtkMRMLLinearTransformNode", name
