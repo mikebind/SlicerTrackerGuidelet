@@ -161,6 +161,7 @@ def showLink(pt, closestPtFcn, linkMarkupNode=None):
 
 
 sessionsDir = r"C:\Users\mike.bindschadler@seattlechildrens.org\OneDrive - SCH\Airway4D\Temp\TrackerFiles\2025\Sessions_Backup\Side_Panel_Tuesday"
+sessionsDir = r"C:\Users\mike.bindschadler@seattlechildrens.org\OneDrive - SCH\Airway4D\Temp\TrackerFiles\2025\Sessions_Backup\Chest_Panel_Tuesday"
 
 progObj = slicer.modules.ExampleGuideletWidget.guideletInstance.progressObj
 zoneTuples = slicer.modules.ExampleGuideletWidget.guideletInstance.zoneTuples
@@ -190,7 +191,8 @@ vertices = vtk.vtkCellArray()
 colors = vtk.vtkFloatArray()
 colors.SetName("ColorIdx")
 
-lumenModel = getNode("Side_AirwayLumen")
+# lumenModel = getNode("Side_AirwayLumen")
+lumenModel = getNode("Chest_AirwayLumen")
 
 zoneDict = {zt[0]: {"modelNode": zt[1], "triggerDist": zt[2]} for zt in zoneTuples}
 zoneDict["Lumen"] = {"modelNode": lumenModel, "triggerDist": 0}
