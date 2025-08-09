@@ -5,7 +5,7 @@ import numpy as np
 import json
 import re
 import slicer, vtk
-from typing import List, Tuple, Optional
+from typing import List, Tuple, Optional, Union
 import scipy
 from pathlib import Path
 
@@ -368,6 +368,7 @@ class ScopeRun(object):
         self.orientationsX = orientationsX
         self.coneModel = None
         self.tubeModel = None
+        self.contactModels = []
         self.userName = None
 
     def setParentRecordingObject(self, parentRecordingObject):
@@ -487,7 +488,7 @@ class ScopeRun(object):
         txt = "\n".join(lines)
         return txt
 
-    def calcScore(self, minWithdrawalTimeSec=2, maxWithdrawalTimeSec=5):
+    def calcScore(self, minWithdrawalTimeSec=1, maxWithdrawalTimeSec=5):
         """Calculate score for leaderboard.
         Basic idea for scoring:
         10x adv phase time + penalties for contacts, contact duration, and
@@ -564,18 +565,51 @@ class ScopeRun(object):
         self.coneModel, self.tubeModel = modelNodesFromPositionsAndOrientations(
             self.positions, self.orientationsZ, scalars=None, sizeFactor=3.0
         )
+        self.contactModels = self.createContactModels()
         if not show:
             self.hideModelNodes()
 
     def showModelNodes(self):
         logging.debug("ScopeRun.showModelNodes()")
-        self.coneModel.GetDisplayNode().SetVisibility(True)
-        self.tubeModel.GetDisplayNode().SetVisibility(True)
+        if self.coneModel:
+            self.coneModel.GetDisplayNode().SetVisibility(True)
+        if self.tubeModel:
+           self.tubeModel.GetDisplayNode().SetVisibility(True)
+        for contactModel in self.contactModels:
+            contactModel.GetDisplayNode().SetVisibility(True)
 
     def hideModelNodes(self):
         logging.debug("ScopeRun.hideModelNodes()")
-        self.coneModel.GetDisplayNode().SetVisibility(False)
-        self.tubeModel.GetDisplayNode().SetVisibility(False)
+        if self.coneModel:
+            self.coneModel.GetDisplayNode().SetVisibility(False)
+        if self.tubeModel:
+           self.tubeModel.GetDisplayNode().SetVisibility(False)
+        for contactModel in self.contactModels:
+            contactModel.GetDisplayNode().SetVisibility(False)
+
+    def createContactModels(self):
+        """Make a polydata point model of closest point contact locations for each
+        zone, currently limited to advancing phase.  If zone analysis not present, 
+        just return an empty list.
+        """
+        if not hasattr(self, 'advPhase'):
+            logging.info("No advancing phase for current scope run, skipping contact model creation.")
+            return []
+        if not hasattr(self.advPhase, 'zoneAnalysisDict'):
+            logging.info("No completed zone analysis for current scope run advancing phase, skipping contact model creation.")
+            return []
+        #
+        zaDict = self.advPhase.zoneAnalysisDict
+        contactModels = []
+        for zoneName, za in zaDict.items():
+            # Create contact location polydata model
+            contactModel = za.createContactModel()
+            if contactModel:
+                contactModels.append(contactModel)
+        return contactModels
+
+        
+
 
 
 class ProgressObj(object):
@@ -716,9 +750,11 @@ class ZoneAnalysisObj:
         #   number of zones triggered (max 4?)
         # Might also be interesting to record the places that are scraped? (i.e. closest
         # points when below threshold).
-        self.rawZoneDists = distanceFromModel(self.parent.positions, self.zoneModelNode)
+        #self.rawZoneDists = distanceFromModel(self.parent.positions, self.zoneModelNode)
+        self.rawZoneDists, closestPtArr = distancesAndClosestPointsFromModel(self.parent.positions, self.zoneModelNode)
         self.adjZoneDists = self.rawZoneDists - self.triggerThreshDistanceMm
         self.contactFlags = self.adjZoneDists <= 0
+        self.contactPoints = closestPtArr[self.contactFlags]
         self.stepDurations = calcStepDurations(self.parent.timeStamps)
         self.contactDurations, self.contactIdxArray = calcZoneContactDurations(
             self.contactFlags, self.stepDurations
@@ -754,6 +790,37 @@ class ZoneAnalysisObj:
         # Total contact time, number of sound triggers, closest approach
         outputs = (self.totalContactDuration, self.nSounds, self.minimumZoneDistance)
         return outputs
+    
+    def createContactModel(self, outputModelNode=None):
+        if not hasattr(self, 'contactPoints'):
+            return None
+        
+        points = vtk.vtkPoints()
+        vertices = vtk.vtkCellArray()
+        for contactPoint in self.contactPoints:
+            pointID = points.InsertNextPoint(contactPoint)
+            cellID = vertices.InsertNextCell(1)
+            vertices.InsertCellPoint(pointID)
+        pointsPolyData = vtk.vtkPolyData()
+        pointsPolyData.SetPoints(points)
+        pointsPolyData.SetVerts(vertices)
+
+        sphereSource = vtk.vtkSphereSource()
+        sphereSource.SetRadius(2)
+        glyphFilter = vtk.vtkGlyph3D()
+        glyphFilter.SetSourceConnection(sphereSource.GetOutputPort())
+        glyphFilter.SetInputData(pointsPolyData)
+
+        if outputModelNode is None:
+            modelName = f"{self.zoneModelNode.GetName()}_Contacts"
+            outputModelNode = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLModelNode', modelName)
+            outputModelNode.CreateDefaultDisplayNodes()
+        # Connect to glyph filter
+        outputModelNode.SetPolyDataConnection(glyphFilter.GetOutputPort())
+        # Set color
+        dn = outputModelNode.GetDisplayNode()
+        dn.SetColor(1.0,0.0,0.0)
+        return outputModelNode
 
 
 class Leaderboard(object):
@@ -822,7 +889,8 @@ class Leaderboard(object):
         logging.debug(f"Successfully wrote leaderboard to '{filePath.as_posix()}'")
 
     @classmethod
-    def deserialize(cls, filePath: Path):
+    def deserialize(cls, filePath: Union[Path,str]):
+        filePath = Path(filePath) # force to pathlib.Path object
         with filePath.open("r") as fp:
             entryDataList = json.load(fp)
         listOfEntries = []
@@ -2129,6 +2197,7 @@ def modelNodesFromPositionsAndOrientations(
     # sphere = vtk.vtkSphereSource()  # ConeSource()
     cone = vtk.vtkConeSource()
     cone.SetResolution(18)
+    cone.SetRadius(0.30)
 
     linesPolyData = vtk.vtkPolyData()
     linesPolyData.SetPoints(points)
@@ -2190,6 +2259,33 @@ def distanceFromModel(positionArray, modelNode):
         # using EvaluateFunctionAndGetClosestPoint(pt, closestPt)
     return distanceArr
 
+def distancesAndClosestPointsFromModel(positionArray, modelNode):
+    # Transform model polydata to world coordinate system
+    if modelNode.GetParentTransformNode():
+        transformModelToWorld = vtk.vtkGeneralTransform()
+        slicer.vtkMRMLTransformNode.GetTransformBetweenNodes(
+            modelNode.GetParentTransformNode(), None, transformModelToWorld
+        )
+        polyTransformToWorld = vtk.vtkTransformPolyDataFilter()
+        polyTransformToWorld.SetTransform(transformModelToWorld)
+        polyTransformToWorld.SetInputData(modelNode.GetPolyData())
+        polyTransformToWorld.Update()
+        surface_World = polyTransformToWorld.GetOutput()
+    else:
+        surface_World = modelNode.GetPolyData()
+    # Set up filter
+    distanceFilter = vtk.vtkImplicitPolyDataDistance()
+    distanceFilter.SetInput(surface_World)
+    #
+    distanceArr = np.zeros(positionArray.shape[0])
+    closestPtArr = np.zeros((positionArray.shape[0], 3))
+    for idx in range(positionArray.shape[0]):
+        closestPt = np.zeros(3)
+        distanceArr[idx] = distanceFilter.EvaluateFunctionAndGetClosestPoint(positionArray[idx, :],closestPt)
+        closestPtArr[idx,:] = closestPt
+       
+    return distanceArr, closestPtArr
+
 
 def calcStepDurations(timeStamps):
     """Calculate step durations in time. The step duration is taken to be the
@@ -2223,7 +2319,7 @@ def calcZoneContactDurations(contactFlags, stepDurations):
     return contactDurations, tuple(zip(contactStartIdxs, contactEndIdxs))
 
 
-def findSoundTriggerIdxs(timeStamps, contactFlags, soundDurationSec=3.0):
+def findSoundTriggerIdxs(timeStamps, contactFlags, soundDurationSec=2.0):
     """Find the time stamp indices where playing a sound was triggered
     (if sounds were on). This takes into account that a sound cannot
     be repeated until the current instance is completed. (Though I think
