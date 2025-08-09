@@ -327,7 +327,7 @@ class GuideletLogic(ScriptedLoadableModuleLogic):
             "StyleSheet": "DefaultStyle.qss",
             "LiveUltrasoundNodeName": "Image_Reference",
             "LiveUltrasoundNodeName_Needle": "Image_Needle",
-            "PlusServerHostNamePort": "localhost:18940",
+            "PlusServerHostNamePort": "localhost:18941",
             "RecordingFilenamePrefix": "GuideletRecording-",
             "RecordingFilenameExtension": ".mhd",
             "PlusAppDataDirectory": plusAppDataDirectory,
@@ -1398,12 +1398,12 @@ OUCH2_ZONE_COLOR = (0.501961, 0.682353, 0.501961)
 SEPTUM_ZONE_COLOR = (0.5647, 0.9333, 0.5647)
 
 soundDir = os.path.join(moduleDir, "Resources", "Sounds")
-COUGH_SOUND_PATH = pathlib.Path(soundDir, "cough1_Edit.wav")
+COUGH_SOUND_PATH = pathlib.Path(soundDir, "cough1_Edit2.wav")
 GAG_SOUND_PATH = pathlib.Path(
-    soundDir, "KaalanGagSound.wav"
+    soundDir, "KaalanGagSound_2.wav"
 )  # or KaalanProlongedGagging.wav
-SEPTUM_SOUND_PATH = pathlib.Path(soundDir, "OwMySeptumV2.wav")
-OUCH2_SOUND_PATH = pathlib.Path(soundDir, "OwThatHurts.wav")
+SEPTUM_SOUND_PATH = pathlib.Path(soundDir, "OwMySeptumV3.wav")
+OUCH2_SOUND_PATH = pathlib.Path(soundDir, "OwThatHurts2.wav")
 MOUTH_SOUND_PATH = pathlib.Path(soundDir, "Mouth.wav")
 RIGHT_NOSTRIL_SOUND_PATH = pathlib.Path(soundDir, "RightNostril.wav")
 TEST_SOUND_PATH = pathlib.Path(soundDir, "testZoneSound.wav")
@@ -1485,6 +1485,9 @@ CHEST2025_SENSOR_TO_STL_NAME = "HeadSensorToFlat25Ch"  # NOTE:
 # NOTE: the sensor to STL name actuall depends on which clipped sensor is
 # used, not on which head model is used, but for 2025 bootcamp, the flat sensor
 # will be used for the Chest Panel head model.
+# NOTE: Actually, now this is a different matrix depending on which server configuration
+# is used. For Aug 2025, this includes a correction adjustment which applies only
+# to the Chest Panel head (the old one was presumed to apply to both STLs)
 # Sound zone models exported with decimation 0.6, and smoothing 0.3
 CHEST2025_COUGH_ZONE_MODEL = os.path.join(
     segDir2025Chest, "Chest_CoughZone_Cleaned.vtk"
@@ -1522,16 +1525,58 @@ CHEST2025_NOSE_CARINA_POINTS = os.path.join(
 CHEST2025_PROGRESS_CURVE = os.path.join(
     segDir2025Chest, "Chest_ProgressCurveReference.mrk.json"
 )
+# MARK: CHEST_AUG25
+# These are for the deformed zone models
+CHEST_AUG25_IMAGE = os.path.join(segDir2025Chest, "Chest_1mm_Deformed.nrrd")
+CHEST_AUG25_OUTERMODEL_STL = CHEST2025_OUTERMODEL_STL  # OK to reuse
+CHEST_AUG25_LUMENMODEL_STL = os.path.join(segDir2025Chest, "ChestDef_AirwayLumen.vtk")
+CHEST_AUG25_SOURCE_DEFORMED_SEG = os.path.join(
+    segDir2025Chest, "Seg_ChestPanelHeadDeformed.seg.nrrd"
+)
+CHEST_AUG25_COUGH_ZONE_MODEL = os.path.join(segDir2025Chest, "ChestDef_CoughZone.vtk")
+CHEST_AUG25_GAG_ZONE_MODEL = os.path.join(
+    segDir2025Chest, "ChestDef_GagZoneExpanded3.vtk"
+)
+CHEST_AUG25_OUCH2_ZONE_MODEL = os.path.join(segDir2025Chest, "ChestDef_OuchZone2.vtk")
+CHEST_AUG25_SEPTUM_ZONE_MODEL = os.path.join(
+    segDir2025Chest, "ChestDef_SeptumZone_Expanded.vtk"
+)
+CHEST_AUG25_ZONE_PATHS_DICT = {
+    "cough": {
+        "STL": CHEST_AUG25_COUGH_ZONE_MODEL,
+        "Color": COUGH_ZONE_COLOR,
+        "SoundPath": COUGH_SOUND_PATH,
+    },
+    "gag": {
+        "STL": CHEST_AUG25_GAG_ZONE_MODEL,
+        "Color": GAG_ZONE_COLOR,
+        "SoundPath": GAG_SOUND_PATH,
+    },
+    "septum": {
+        "STL": CHEST_AUG25_SEPTUM_ZONE_MODEL,
+        "Color": SEPTUM_ZONE_COLOR,
+        "SoundPath": SEPTUM_SOUND_PATH,
+    },
+    "ouch2": {
+        "STL": CHEST_AUG25_OUCH2_ZONE_MODEL,
+        "Color": OUCH2_ZONE_COLOR,
+        "SoundPath": OUCH2_SOUND_PATH,
+    },
+}
+# Reuse progress curve
+CHEST_AUG25_NOSE_CARINA_POINTS = CHEST2025_NOSE_CARINA_POINTS
+CHEST_AUG25_PROGRESS_CURVE = CHEST2025_PROGRESS_CURVE
+# Changing to use deformed model for AUG25
 CHEST_2025_SCENE_DICT = {
-    "image": CHEST2025_IMAGE,
-    "airwayZoneSeg": CHEST2025_AIRWAYZONE_SEGMENTATION,
-    "outerModel": CHEST2025_OUTERMODEL_STL,
-    "lumenModel": CHEST2025_LUMENMODEL_STL,
-    "sourceSeg": CHEST2025_SOURCE_SEG,
+    "image": CHEST_AUG25_IMAGE,
+    "airwayZoneSeg": CHEST2025_AIRWAYZONE_SEGMENTATION,  # reuse
+    "outerModel": CHEST_AUG25_OUTERMODEL_STL,
+    "lumenModel": CHEST_AUG25_LUMENMODEL_STL,
+    "sourceSeg": CHEST_AUG25_SOURCE_DEFORMED_SEG,
     "sensorToStlTransformName": CHEST2025_SENSOR_TO_STL_NAME,
-    "zonePathsDict": CHEST2025_ZONE_PATHS_DICT,
-    "noseCarina": CHEST2025_NOSE_CARINA_POINTS,
-    "progressCurve": CHEST2025_PROGRESS_CURVE,
+    "zonePathsDict": CHEST_AUG25_ZONE_PATHS_DICT,
+    "noseCarina": CHEST_AUG25_NOSE_CARINA_POINTS,
+    "progressCurve": CHEST_AUG25_PROGRESS_CURVE,
 }
 
 ## MARK: SIDE 2025 ##
@@ -1549,6 +1594,9 @@ SIDE2025_SENSOR_TO_STL_NAME = "HeadSensorToCase25Ch"  # NOTE:
 # NOTE: the sensor to STL name actually depends on which clipped sensor is
 # used, not on which head model is used, but for 2025 bootcamp, the Case sensor
 # will be used for the Side Panel head model.
+# NOTE: This transform is supplied by the 2025 Final plusserver configuration, but
+# NOT by the ForAug25 plusserver configuration.  The equivalent there is named
+# "HeadSensorToCase25Si" (note change in last two letters)
 # Sound zone models exported with decimation 0.6, and smoothing 0.3
 SIDE2025_COUGH_ZONE_MODEL = os.path.join(segDir2025Side, "Side_CoughZone.vtk")
 SIDE2025_GAG_ZONE_MODEL = os.path.join(segDir2025Side, "Side_GagZone.vtk")
@@ -1726,7 +1774,7 @@ class ExampleGuideletLogic(GuideletLogic):
             "defaultSoundDistanceThresholdMm": "2.0",
             "septumZoneSoundDistThreshMm": "2.0",
             "ouch2ZoneSoundDistThreshMm": "2.0",
-            "gagZoneSoundDistThreshMm": "3.0",
+            "gagZoneSoundDistThreshMm": "5.0",
             "coughZoneSoundDistThreshMm": "2.0",
         }
         self.updateSettings(settingList, "Default")
