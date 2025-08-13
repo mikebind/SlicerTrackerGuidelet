@@ -5,7 +5,7 @@ import numpy as np
 import json
 import re
 import slicer, vtk
-from typing import List, Tuple, Optional
+from typing import List, Tuple, Optional, Union
 import scipy
 from pathlib import Path
 
@@ -831,6 +831,27 @@ class Leaderboard(object):
             listOfEntries.append(entry)
         return Leaderboard(listOfEntries=listOfEntries)
 
+    @classmethod
+    def createLeaderLeaderboard(cls):
+        LLB = Leaderboard()
+        leaderNames = [
+            "Jeff Sperring",
+            "Susanne Beitel",
+            "Zafar Chaudry",
+            "Andre Dick",
+            "Vittorio Gallo",
+            "Bonnie Fryzlewicz",
+            "Jeff Ojemann",
+            "Jamie Phillips",
+            "Lisa Hayward",
+            "Mark Salierno",
+            "Eric Tham",
+        ]
+        for name in leaderNames:
+            e = LeaderboardEntry.createRandomFakeEntry(name)
+            LLB.addNewEntry(e)
+        return LLB
+
 
 class LeaderboardEntry(object):
     def __init__(self, parentScopeRun: Optional[ScopeRun] = None):
@@ -841,6 +862,100 @@ class LeaderboardEntry(object):
         self.parentScopeRun: Optional[ScopeRun] = None  # This will not be serialized
         if parentScopeRun is not None:
             self.setParentScopeRun(parentScopeRun)
+
+    @classmethod
+    def createRandomFakeEntry(cls, userName):
+        """Create a plausible random fake entry, drawing from default
+        distributions of score elements.
+        """
+        rng = np.random.default_rng()
+        advTime = rng.uniform(2.0, 25.0)
+        nContacts = rng.choice([0, 0, 1, 1, 2, 2, 2, 3, 3, 4, 6])
+        contactTime = nContacts * rng.uniform(0.1, 2.5)
+        wdrTime = rng.uniform(0.5, 9.0)
+        return cls.createFakeEntry(
+            userName,
+            advTime=advTime,
+            nContacts=nContacts,
+            contactTime=contactTime,
+            wdrTime=wdrTime,
+        )
+
+    @classmethod
+    def createFakeEntry(
+        cls,
+        userName: str,
+        score: Optional[float] = None,
+        advTime: float = 15.0,
+        nContacts: int = 3,
+        contactTime: float = 2.3,
+        wdrTime: float = 4.0,
+        wdrPenalty: Optional[float] = None,
+        flawlessFlag: Optional[bool] = None,
+        timeWeight: float = 10,  # 10 points per second
+        penaltyPerContact: float = 20,  # 20 points per contact initiation (basically per sound)
+        contactTimeWeight: float = 20,  # 20 points per second of contact duration
+        minWithdrawalTimeSec: float = 1,  # withdrawal should take at least this long
+        tooFastWdrPenalty: float = 20,  # 20 points if too fast wdr
+        maxWithdrawalTimeSec: float = 5,  # withdrawal should take no longer than this long
+        tooSlowWdrPenalty: float = 20,  # 20 points if too slow wdr
+    ):
+        """Specify just the things shown in the leaderboard display.  If score,
+        wdrPenalty, or flawlessFlag are left as None, they are calculated  to be
+        consistent with the other values.  For example, flawlessFlag is True if
+        nContacts is 0, contactTime is zero, and wdrPenalty is zero. Likewise,
+        score is calculated based supplied values and weights. wdrPenalty, if
+        None, is found from the time limits and penalty values.  If any of these
+        values is supplied directly, they are used directly, even if it creates
+        a leaderboard entry which is not really self-consistent.  For example,
+        an entry could be marked flawless even if it had non-zero nContacts.
+
+        The only required input is userName, everything else has a default value.
+
+        If specified, the parameters which are shown directly are:
+        score, advTime, nContacts, contactTime, wdrTime, and flawlessFlag
+
+        If not specified, some parameters are calcluated based on others:
+        wdrPenalty: calculated using minWithdrawalTimeSec, maxWithdrawalTimeSec, tooFastWdrPenalty, and tooSlowWdrPenalty
+        flawlessFlag: True if no contacts, no contact time, and no wdrPenalty
+        score: calculated from advTime, nContacts, contactTime, wdrPenalty, timeWeight, contactTimeWeight, and penaltyPerContact
+
+        If not shown directly and not used in calculating an unspecified parameter, parameter values have no effect.
+
+        Example Usage:
+        e = LeaderboardEntry.createFakeEntry('Barbour', advTime=5, nContacts=0, contactTime=0, wdrTime=10)
+
+        """
+        newEntry = LeaderboardEntry(parentScopeRun=None)
+        newEntry.userName = userName
+        newEntry.flawlessFlag = flawlessFlag
+        if wdrPenalty is None:
+            # Calculate withdrawal penalty first
+            wdrPenalty = 0  # no penalty if within range
+            if wdrTime < minWithdrawalTimeSec:
+                wdrPenalty = tooFastWdrPenalty
+            elif wdrTime > maxWithdrawalTimeSec:
+                wdrPenalty = tooSlowWdrPenalty
+        if score is None:
+            # Calculate score
+            score = (
+                advTime * timeWeight
+                + penaltyPerContact * nContacts
+                + contactTime * contactTimeWeight
+                + wdrPenalty
+            )
+
+        newEntry.score = score
+        newEntry.scoreComponents = {
+            "advancingTime": (advTime, timeWeight),
+            "contactCountPenalty": (nContacts, penaltyPerContact),
+            "contactTimePenalty": (contactTime, contactTimeWeight),
+            "withdrawalPenalty": (wdrTime, wdrPenalty),
+        }
+        if flawlessFlag is None:
+            flawlessFlag = nContacts == 0 and contactTime == 0 and wdrPenalty == 0
+        newEntry.flawlessFlag = flawlessFlag
+        return newEntry
 
     def setParentScopeRun(self, parentScopeRun: ScopeRun):
         self.score = parentScopeRun.score
@@ -2348,11 +2463,14 @@ def makeScoreQTable(
     )
 
     table.setMinimumHeight(tableHeight)
-    table.setMinimumWidth(table.width)
+    table.setMinimumWidth(table.width + 5)
     return table
 
 
-def show_leaderboard(srList: List[ScopeRun], currentSr: Optional[ScopeRun] = None):
+def show_leaderboard(
+    srList: Union[List[ScopeRun], List[LeaderboardEntry]],
+    currentSr: Optional[ScopeRun] = None,
+):
     """
     Pop up a “Leaderboard” dialog with centered text, alternating stripes,
     a styled header, and the top row highlighted + bolded.
