@@ -35,7 +35,6 @@ from Lib.HelperClasses import (
 )
 from enum import Enum
 
-
 # Lib.HelperClasses.loadOnlyScopeRunsFromSessionFile()
 
 # To populate head model selector in guidelet launcher:
@@ -319,10 +318,20 @@ class GuideletLogic(ScriptedLoadableModuleLogic):
         moduleDir = os.path.dirname(__file__)
         defaultSavePath = os.path.join(moduleDir, "SavedResults")
         userHomeDir = os.path.expanduser("~")
-        plusAppDataDirectory = os.path.join(
-            userHomeDir, "PlusApp-2.8.0.20191105-Win32", "data"
-        )
 
+        plusAppDirectoryNames = ["PlusApp-2.8.0.20250221-Win32", "PlusApp-2.8.0.20191105-Win32"]
+        plusAppDataDirectory = None
+        for plusAppDirName in plusAppDirectoryNames:
+            plusAppDataPathCandidate = os.path.join(
+                userHomeDir, plusAppDirName , "data"
+            )
+            if os.path.isdir(plusAppDataPathCandidate):
+                plusAppDataDirectory = plusAppDataPathCandidate
+                break
+        
+        if plusAppDataDirectory is None:
+            slicer.util.errorDisplay(f"No PlusApp data directory found under {userHomeDir}!  Accessing recorded paths will fail!")
+        
         settingList = {
             "StyleSheet": "DefaultStyle.qss",
             "LiveUltrasoundNodeName": "Image_Reference",
@@ -330,7 +339,7 @@ class GuideletLogic(ScriptedLoadableModuleLogic):
             "PlusServerHostNamePort": "localhost:18941",
             "RecordingFilenamePrefix": "GuideletRecording-",
             "RecordingFilenameExtension": ".mhd",
-            "PlusAppDataDirectory": plusAppDataDirectory,
+            "PlusAppDataDirectory": plusAppDataDirectory if plusAppDataDirectory else '',
             "SavedScenesDirectory": defaultSavePath,
             "UltrasoundBrightnessControl": "Buttons",
             "RecordingEnabledWhenConnectorNodeDisconnected": "False",
@@ -1757,7 +1766,9 @@ class ExampleGuideletLogic(GuideletLogic):
         moduleDir = os.path.dirname(slicer.modules.exampleguidelet.path)
         defaultUserSessionsSavePath = os.path.join(
             moduleDir, "UserSessionResults"
-        )  # TODO: Create folder if it doesn't exist
+        )  
+        # Create folder if it doesn't exist
+        os.makedirs(defaultUserSessionsSavePath, exist_ok=True)
         defaultSceneSavePath = os.path.join(moduleDir, "SavedScenes")
         moduleDirectoryPath = slicer.modules.exampleguidelet.path.replace(
             "ExampleGuidelet.py", ""
@@ -2329,7 +2340,7 @@ class ExampleGuideletGuidelet(Guidelet):
                     logging.debug(
                         f"Success on attempt {attempt_count} to access {recordingFileFullPath}!"
                     )
-                # Process the recording now that the file is available
+                # Process the recording now that the file is available (scope run analysis is triggered here)
                 newRecording.processRecordingToScopeRuns(
                     leafTransformNode,
                     self.progressObj,
